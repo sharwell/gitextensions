@@ -2,20 +2,18 @@
 
 rem
 rem Parameters
-rem   %1: vs_solution_version: VS solution version: VS2012, VS2013
-rem   %2: vs_configuration:    VS configuration:    Debug, Release
-rem   %3: vs_target:           target:              Build or Rebuild
+rem   %1: vs_configuration:    VS configuration:    Debug, Release
+rem   %2: vs_target:           target:              Build or Rebuild
 rem
 
-set vs_solution_version=%1
-set vs_configuration=%2
-set vs_target=%3
+set vs_configuration=%1
+set vs_target=%2
 
 rem %~p0 = dir to location of this cmd file
 rem cd /d "%~p0"
 
 set msbuild="%windir%\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe"
-set project="%~p0\..\GitExtensions.%vs_solution_version%.sln"
+set project="%~p0\..\GitExtensions.sln"
 set SkipShellExtRegistration=1
 set EnableNuGetPackageRestore=true
 

@@ -3,9 +3,9 @@
 cd /d "%~p0"
 
 set msbuild="%programfiles(x86)%\MSBuild\12.0\Bin\MSBuild.exe"
-set project=..\GitExtensions.VS2013.sln
-set projectShellEx=..\GitExtensionsShellEx\GitExtensionsShellEx.VS2013.sln
-set projectSshAskPass=..\GitExtSshAskPass\GitExtSshAskPass.VS2013.sln
+set project=..\GitExtensions.sln
+set projectShellEx=..\GitExtensionsShellEx\GitExtensionsShellEx.sln
+set projectSshAskPass=..\GitExtSshAskPass\GitExtSshAskPass.sln
 set nuget=..\.nuget\nuget.exe
 set SkipShellExtRegistration=1
 set EnableNuGetPackageRestore=true

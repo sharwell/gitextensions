@@ -1,6 +1,6 @@
 @echo off
 
-call "%~p0\build.generic.cmd" %1 Debug Build
+call "%~p0\build.generic.cmd" Debug Build
 
 IF %ERRORLEVEL% EQU 0 goto success
 echo BUILD FAILED
