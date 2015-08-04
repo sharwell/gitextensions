@@ -2,7 +2,13 @@
 
 cd /d "%~p0"
 
-set msbuild="%programfiles(x86)%\MSBuild\12.0\Bin\MSBuild.exe"
+set msbuild="%programfiles(x86)%\MSBuild\14.0\Bin\MSBuild.exe"
+if not exist %msbuild% (
+  set msbuild="%programfiles(x86)%\MSBuild\12.0\Bin\MSBuild.exe"
+)
+if not exist %msbuild% (
+  set msbuild="%programfiles(x86)%\MSBuild\11.0\Bin\MSBuild.exe"
+)
 set project=..\GitExtensions.sln
 set projectShellEx=..\GitExtensionsShellEx\GitExtensionsShellEx.sln
 set projectSshAskPass=..\GitExtSshAskPass\GitExtSshAskPass.sln
