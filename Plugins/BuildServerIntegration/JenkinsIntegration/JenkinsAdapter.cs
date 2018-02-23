@@ -111,53 +111,54 @@ namespace JenkinsIntegration
             public long Timestamp = -1;
         }
 
-        private Task<ResponseInfo> GetBuildInfoTask(string projectUrl, bool fullInfo, CancellationToken cancellationToken)
+        private async Task<ResponseInfo> GetBuildInfoTaskAsync(string projectUrl, bool fullInfo, CancellationToken cancellationToken)
         {
-            return GetResponseAsync(FormatToGetJson(projectUrl, fullInfo), cancellationToken)
-                .ContinueWith(
-                    task =>
+            string t = null;
+            long timestamp = 0;
+            IEnumerable<JToken> s = Enumerable.Empty<JToken>();
+
+            try
+            {
+                t = await GetResponseAsync(FormatToGetJson(projectUrl, fullInfo), cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Could be cancelled or failed
+            }
+
+            if (t.IsNotNullOrWhitespace())
+            {
+                JObject jobDescription = JObject.Parse(t);
+                if (jobDescription["builds"] != null)
+                {
+                    //Freestyle jobs
+                    s = jobDescription["builds"];
+                }
+                else if (jobDescription["jobs"] != null)
+                {
+                    //Multibranch pipeline
+                    s = jobDescription["jobs"]
+                        .SelectMany(j => j["builds"]);
+                    foreach (var j in jobDescription["jobs"])
                     {
-                        long timestamp = 0;
-                        IEnumerable<JToken> s = Enumerable.Empty<JToken>();
-                        if (!task.IsCanceled && !task.IsFaulted)
-                        {
-                            string t = task.Result;
-                            if (t.IsNotNullOrWhitespace())
-                            {
-                                JObject jobDescription = JObject.Parse(t);
-                                if (jobDescription["builds"] != null)
-                                {
-                                    //Freestyle jobs
-                                    s = jobDescription["builds"];
-                                }
-                                else if (jobDescription["jobs"] != null)
-                                {
-                                    //Multibranch pipeline
-                                    s = jobDescription["jobs"]
-                                        .SelectMany(j => j["builds"]);
-                                    foreach (var j in jobDescription["jobs"])
-                                    {
-                                        long ts = j["lastBuild"]["timestamp"].ToObject<long>();
-                                        timestamp = Math.Max(timestamp, ts);
-                                    }
-                                }
-                                //else: The server had no response (overloaded?) or a multibranch pipeline is not configured
+                        long ts = j["lastBuild"]["timestamp"].ToObject<long>();
+                        timestamp = Math.Max(timestamp, ts);
+                    }
+                }
+                //else: The server had no response (overloaded?) or a multibranch pipeline is not configured
 
-                                if (jobDescription["lastBuild"] != null)
-                                {
-                                    timestamp = jobDescription["lastBuild"]["timestamp"].ToObject<long>();
-                                }
-                            }
-                        }
+                if (jobDescription["lastBuild"] != null)
+                {
+                    timestamp = jobDescription["lastBuild"]["timestamp"].ToObject<long>();
+                }
+            }
 
-                        return new ResponseInfo
-                        {
-                            Url = projectUrl,
-                            Timestamp = timestamp,
-                            JobDescription = s
-                        };
-                    },
-                    TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.AttachedToParent);
+            return new ResponseInfo
+            {
+                Url = projectUrl,
+                Timestamp = timestamp,
+                JobDescription = s
+            };
         }
 
         public IObservable<BuildInfo> GetFinishedBuildsSince(IScheduler scheduler, DateTime? sinceDate = null)
@@ -176,7 +177,7 @@ namespace JenkinsIntegration
         private IObservable<BuildInfo> GetBuilds(IScheduler scheduler, DateTime? sinceDate = null, bool? running = null)
         {
             return Observable.Create<BuildInfo>((observer, cancellationToken) =>
-                Task<IDisposable>.Factory.StartNew(
+                Task<IDisposable>.Run(
                     () => scheduler.Schedule(() => ObserveBuilds(sinceDate, running, observer, cancellationToken))));
         }
 
@@ -193,11 +194,11 @@ namespace JenkinsIntegration
                     if (LastBuildCache[projectUrl].Timestamp <= 0)
                     {
                         //This job must be updated, no need to to check the latest builds
-                        allBuildInfos.Add(GetBuildInfoTask(projectUrl, true, cancellationToken));
+                        allBuildInfos.Add(GetBuildInfoTaskAsync(projectUrl, true, cancellationToken));
                     }
                     else
                     {
-                        latestBuildInfos.Add(GetBuildInfoTask(projectUrl, false, cancellationToken));
+                        latestBuildInfos.Add(GetBuildInfoTaskAsync(projectUrl, false, cancellationToken));
                     }
                 }
 
@@ -212,7 +213,7 @@ namespace JenkinsIntegration
                         if (info.Result.Timestamp > LastBuildCache[info.Result.Url].Timestamp)
                         {
                             //The cache has at least one newer job, query the status
-                            allBuildInfos.Add(GetBuildInfoTask(info.Result.Url, true, cancellationToken));
+                            allBuildInfos.Add(GetBuildInfoTaskAsync(info.Result.Url, true, cancellationToken));
                         }
                     }
                 }

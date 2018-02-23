@@ -127,7 +127,7 @@ namespace TfsIntegration
                 return Observable.Empty<BuildInfo>();
 
             return Observable.Create<BuildInfo>((observer, cancellationToken) =>
-                Task<IDisposable>.Factory.StartNew(
+                Task<IDisposable>.Run(
                     () => scheduler.Schedule(() => ObserveBuilds(sinceDate, running, observer, cancellationToken))));
         }
 

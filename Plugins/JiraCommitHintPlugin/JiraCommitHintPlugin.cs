@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Atlassian.Jira;
+using GitUI;
 using GitUIPluginInterfaces;
 using NString;
 using ResourceManager;
@@ -54,12 +55,18 @@ namespace JiraCommitHintPlugin
         {
             if (enabledSettings.ValueOrDefault(Settings))
                 return false;
+
             if (jira == null)
                 return false;
-            GetMessageToCommit(jira, query, stringTemplate).ContinueWith(t =>
-            {
-                MessageBox.Show(string.Join(Environment.NewLine, t.Result.Select(jt => jt.Text).ToArray()));
-            });
+
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                async () =>
+                {
+                    var message = await GetMessageToCommitAsync(jira, query, stringTemplate).ConfigureAwait(false);
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    MessageBox.Show(string.Join(Environment.NewLine, message.Select(jt => jt.Text).ToArray()));
+                });
+
             return false;
         }
 
@@ -121,11 +128,15 @@ namespace JiraCommitHintPlugin
                 var localJira = Jira.CreateRestClient(urlSettings.CustomControl.Text, userSettings.CustomControl.Text, passwordSettings.CustomControl.Text);
                 var localQuery = jqlQuerySettings.CustomControl.Text;
                 var localStringTemplate = stringTemplateSetting.CustomControl.Text;
-                GetMessageToCommit(localJira, localQuery, localStringTemplate).ContinueWith(t =>
-                {
-                    var preview = t.Result.FirstOrDefault();
-                    MessageBox.Show(null, preview == null ? EmptyQueryResultMessage : preview.Text ,EmptyQueryResultCaption);
-                });
+
+                ThreadHelper.JoinableTaskFactory.RunAsync(
+                    async () =>
+                    {
+                        var message = await GetMessageToCommitAsync(localJira, localQuery, localStringTemplate).ConfigureAwait(false);
+                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                        var preview = message.FirstOrDefault();
+                        MessageBox.Show(null, preview == null ? EmptyQueryResultMessage : preview.Text ,EmptyQueryResultCaption);
+                    });
             }
             catch (Exception ex)
             {
@@ -185,14 +196,19 @@ namespace JiraCommitHintPlugin
             if (jira?.Issues == null)
                 return;
 
-            GetMessageToCommit(jira, query, stringTemplate).ContinueWith(t =>
-            {
-                currentMessages = t.Result;
-                foreach (var message in currentMessages)
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                async () =>
                 {
-                    e.GitUICommands.AddCommitTemplate(message.Title, () => message.Text);
-                }
-            }, TaskScheduler.FromCurrentSynchronizationContext());
+                    var currentMessages = await GetMessageToCommitAsync(jira, query, stringTemplate).ConfigureAwait(false);
+
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                    this.currentMessages = currentMessages;
+                    foreach (var message in currentMessages)
+                    {
+                        e.GitUICommands.AddCommitTemplate(message.Title, () => message.Text);
+                    }
+                });
         }
 
         private void gitUiCommands_PostRepositoryChanged(object sender, GitUIBaseEventArgs e)
@@ -208,7 +224,7 @@ namespace JiraCommitHintPlugin
             currentMessages = null;
         }
 
-        private static async Task<JiraTaskDTO[]> GetMessageToCommit(Jira jira, string query, string stringTemplate)
+        private static async Task<JiraTaskDTO[]> GetMessageToCommitAsync(Jira jira, string query, string stringTemplate)
         {
             try
             {
