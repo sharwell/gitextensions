@@ -16,6 +16,7 @@ using GitCommands.Settings;
 using GitUI.CommandsDialogs.SettingsDialog.Pages;
 using GitUI.Editor.Diff;
 using ResourceManager;
+using Microsoft.VisualStudio.Threading;
 
 namespace GitUI.Editor
 {
@@ -413,20 +414,20 @@ namespace GitUI.Editor
         }
 
         public void ViewCurrentChanges(string fileName, string oldFileName, bool staged,
-            bool isSubmodule, Task<GitSubmoduleStatus> status)
+            bool isSubmodule, JoinableTask<GitSubmoduleStatus> status)
         {
             if (!isSubmodule)
-                _async.Load(() => Module.GetCurrentChanges(fileName, oldFileName, staged, GetExtraDiffArguments(), Encoding),
+                _async.LoadAsync(() => Module.GetCurrentChanges(fileName, oldFileName, staged, GetExtraDiffArguments(), Encoding),
                     ViewStagingPatch);
             else if (status != null)
-                _async.Load(() =>
+                _async.LoadAsync(() =>
                     {
-                        if (status.Result == null)
+                        if (status.Join() == null)
                             return string.Format("Submodule \"{0}\" has unresolved conflicts", fileName);
-                        return LocalizationHelpers.ProcessSubmoduleStatus(Module, status.Result);
+                        return LocalizationHelpers.ProcessSubmoduleStatus(Module, status.Join());
                     }, ViewPatch);
             else
-                _async.Load(() => LocalizationHelpers.ProcessSubmodulePatch(Module, fileName,
+                _async.LoadAsync(() => LocalizationHelpers.ProcessSubmodulePatch(Module, fileName,
                     Module.GetCurrentChanges(fileName, oldFileName, staged, GetExtraDiffArguments(), Encoding)), ViewPatch);
         }
 
@@ -459,7 +460,7 @@ namespace GitUI.Editor
 
         public void ViewPatch(Func<string> loadPatchText)
         {
-            _async.Load(loadPatchText, ViewPatch);
+            _async.LoadAsync(loadPatchText, ViewPatch);
         }
 
         public void ViewText(string fileName, string text)
@@ -525,7 +526,7 @@ namespace GitUI.Editor
             {
                 if (GitModule.IsValidGitWorkingDir(fullPath))
                 {
-                    _async.Load(getSubmoduleText, text => ViewText(fileName, text));
+                    _async.LoadAsync(getSubmoduleText, text => ViewText(fileName, text));
                 }
                 else
                 {
@@ -534,7 +535,7 @@ namespace GitUI.Editor
             }
             else if (IsImage(fileName))
             {
-                _async.Load(getImage,
+                _async.LoadAsync(getImage,
                             image =>
                             {
                                 ResetForImage();
@@ -560,7 +561,7 @@ namespace GitUI.Editor
             }
             else
             {
-                _async.Load(getFileText, text => ViewText(fileName, text));
+                _async.LoadAsync(getFileText, text => ViewText(fileName, text));
             }
         }
 

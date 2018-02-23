@@ -9,6 +9,7 @@ using System.Windows.Forms;
 using GitCommands;
 using GitCommands.Utils;
 using GitUI.UserControls;
+using Microsoft.VisualStudio.Threading;
 
 namespace GitUI.CommandsDialogs
 {
@@ -131,33 +132,35 @@ namespace GitUI.CommandsDialogs
 
             if (favIconUrl != null)
             {
-                DownloadRemoteImageFileAsync(favIconUrl).ContinueWith(
-                    task =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(
+                    async () =>
+                    {
+                        using (var imageStream = await DownloadRemoteImageFileAsync(favIconUrl))
                         {
-                            using (var imageStream = task.Result)
+                            if (imageStream != null)
                             {
-                                if (imageStream != null)
+                                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                                var favIconImage = Image.FromStream(imageStream)
+                                                        .GetThumbnailImage(16, 16, null, IntPtr.Zero);
+                                var imageCollection = tabControl.ImageList.Images;
+                                var imageIndex = buildReportTabPage.ImageIndex;
+
+                                if (imageIndex < 0)
                                 {
-                                    var favIconImage = Image.FromStream(imageStream)
-                                                            .GetThumbnailImage(16, 16, null, IntPtr.Zero);
-                                    var imageCollection = tabControl.ImageList.Images;
-                                    var imageIndex = buildReportTabPage.ImageIndex;
-
-                                    if (imageIndex < 0)
-                                    {
-                                        buildReportTabPage.ImageIndex = imageCollection.Count;
-                                        imageCollection.Add(favIconImage);
-                                    }
-                                    else
-                                    {
-                                        imageCollection[imageIndex] = favIconImage;
-                                    }
-
-                                    tabControl.Invalidate(false);
+                                    buildReportTabPage.ImageIndex = imageCollection.Count;
+                                    imageCollection.Add(favIconImage);
                                 }
+                                else
+                                {
+                                    imageCollection[imageIndex] = favIconImage;
+                                }
+
+                                tabControl.Invalidate(false);
                             }
-                        },
-                    TaskScheduler.FromCurrentSynchronizationContext());
+
+                        }
+                    });
             }
             if (url != null)
             {
@@ -190,32 +193,27 @@ namespace GitUI.CommandsDialogs
             }
         }
 
-        private static Task<Stream> DownloadRemoteImageFileAsync(string uri)
+        private static async Task<Stream> DownloadRemoteImageFileAsync(string uri)
         {
             var request = (HttpWebRequest) WebRequest.Create(uri);
 
-            return GetWebResponseAsync(request).ContinueWith(
-                task =>
-                    {
-                        var response = task.Result;
+            var response = await GetWebResponseAsync(request).ConfigureAwait(false);
 
-                        // Check that the remote file was found. The ContentType
-                        // check is performed since a request for a non-existent
-                        // image file might be redirected to a 404-page, which would
-                        // yield the StatusCode "OK", even though the image was not
-                        // found.
-                        if ((response.StatusCode == HttpStatusCode.OK ||
-                             response.StatusCode == HttpStatusCode.Moved ||
-                             response.StatusCode == HttpStatusCode.Redirect) &&
-                            response.ContentType.StartsWith("image", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // if the remote file was found, download it
-                            return response.GetResponseStream();
-                        }
+            // Check that the remote file was found. The ContentType
+            // check is performed since a request for a non-existent
+            // image file might be redirected to a 404-page, which would
+            // yield the StatusCode "OK", even though the image was not
+            // found.
+            if ((response.StatusCode == HttpStatusCode.OK ||
+                    response.StatusCode == HttpStatusCode.Moved ||
+                    response.StatusCode == HttpStatusCode.Redirect) &&
+                response.ContentType.StartsWith("image", StringComparison.OrdinalIgnoreCase))
+            {
+                // if the remote file was found, download it
+                return response.GetResponseStream();
+            }
 
-                        return null;
-                    },
-                TaskContinuationOptions.ExecuteSynchronously);
+            return null;
         }
 
         private static Task<HttpWebResponse> GetWebResponseAsync(HttpWebRequest webRequest)

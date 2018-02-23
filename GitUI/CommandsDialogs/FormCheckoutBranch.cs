@@ -9,6 +9,7 @@ using GitCommands.Git;
 using GitCommands.Utils;
 using GitUI.Script;
 using GitUIPluginInterfaces;
+using Microsoft.VisualStudio.Threading;
 using PSTaskDialog;
 using ResourceManager;
 
@@ -441,8 +442,17 @@ namespace GitUI.CommandsDialogs
                 lbChanges.Text = "";
             else
             {
-                Task.Factory.StartNew(() => Module.GetCommitCountString(Module.GetCurrentCheckout(), branch))
-                    .ContinueWith(t => lbChanges.Text = t.Result, TaskScheduler.FromCurrentSynchronizationContext());
+                ThreadHelper.JoinableTaskFactory.RunAsync(
+                    async () =>
+                    {
+                        await TaskScheduler.Default;
+
+                        var text = Module.GetCommitCountString(Module.GetCurrentCheckout(), branch);
+
+                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                        lbChanges.Text = text;
+                    });
             }
         }
 

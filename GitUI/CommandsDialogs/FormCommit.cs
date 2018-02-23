@@ -17,6 +17,7 @@ using GitUI.CommandsDialogs.CommitDialog;
 using GitUI.HelperDialogs;
 using GitUI.Hotkey;
 using GitUI.Script;
+using Microsoft.VisualStudio.Threading;
 using PatchApply;
 using ResourceManager;
 using Timer = System.Windows.Forms.Timer;
@@ -130,7 +131,6 @@ namespace GitUI.CommandsDialogs
         private readonly ICommitTemplateManager _commitTemplateManager;
         private FileStatusList _currentFilesList;
         private bool _skipUpdate;
-        private readonly TaskScheduler _taskScheduler;
         private GitItemStatus _currentItem;
         private bool _currentItemStaged;
         private readonly CommitKind _commitKind;
@@ -164,9 +164,10 @@ namespace GitUI.CommandsDialogs
         public FormCommit(GitUICommands aCommands, CommitKind commitKind, GitRevision editedCommit)
             : base(true, aCommands)
         {
-            _taskScheduler = TaskScheduler.FromCurrentSynchronizationContext();
+            if (!ThreadHelper.JoinableTaskContext.IsOnMainThread)
+                throw new InvalidOperationException($"{nameof(FormCommit)} may only be created on the main thread of the application");
 
-            _unstagedLoader = new AsyncLoader(_taskScheduler);
+            _unstagedLoader = new AsyncLoader();
 
             _useFormCommitMessage = AppSettings.UseFormCommitMessage;
 
@@ -508,7 +509,7 @@ namespace GitUI.CommandsDialogs
                     showUntrackedFilesToolStripMenuItem.Checked ? UntrackedFilesMode.Default : UntrackedFilesMode.No);
 
             if (DoAsync)
-                _unstagedLoader.Load(getAllChangedFilesWithSubmodulesStatus, onComputed);
+                _unstagedLoader.LoadAsync(getAllChangedFilesWithSubmodulesStatus, onComputed);
             else
             {
                 _unstagedLoader.Cancel();
@@ -662,15 +663,16 @@ namespace GitUI.CommandsDialogs
             ResetUnStaged.Enabled = Unstaged.AllItems.Any();
         }
 
-        private void UpdateBranchNameDisplay()
+        private async Task UpdateBranchNameDisplayAsync()
         {
-            Task.Run(() => Module.GetSelectedBranch())
-                .ContinueWith(task =>
-                {
-                    var currentBranchName = task.Result;
-                    branchNameLabel.Text = currentBranchName;
-                    Text = string.Format(_formTitle.Text, currentBranchName, Module.WorkingDir);
-                }, _taskScheduler);
+            await TaskScheduler.Default;
+
+            var currentBranchName = Module.GetSelectedBranch();
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            branchNameLabel.Text = currentBranchName;
+            Text = string.Format(_formTitle.Text, currentBranchName, Module.WorkingDir);
         }
 
         private bool _initialized;
@@ -679,7 +681,7 @@ namespace GitUI.CommandsDialogs
         {
             _initialized = true;
 
-            UpdateBranchNameDisplay();
+            ThreadHelper.JoinableTaskFactory.RunAsync(() => UpdateBranchNameDisplayAsync());
             Cursor.Current = Cursors.WaitCursor;
 
             if (loadUnstaged)
@@ -1492,13 +1494,13 @@ namespace GitUI.CommandsDialogs
                     }
                     unStagedFiles.RemoveAll(item => !item.IsSubmodule && unstagedItems.Contains(item));
                     unStagedFiles.RemoveAll(item => item.IsSubmodule && item.SubmoduleStatus.IsCompleted &&
-                        (item.SubmoduleStatus.Result == null ||
-                        !item.SubmoduleStatus.Result.IsDirty && unstagedItems.Contains(item)));
+                        (item.SubmoduleStatus.Join() == null ||
+                        !item.SubmoduleStatus.Join().IsDirty && unstagedItems.Contains(item)));
                     foreach (var item in unstagedItems.Where(item => item.IsSubmodule &&
-                        (item.SubmoduleStatus.Result == null ||
-                        item.SubmoduleStatus.IsCompleted && item.SubmoduleStatus.Result.IsDirty)))
+                        (item.SubmoduleStatus.Join() == null ||
+                        item.SubmoduleStatus.IsCompleted && item.SubmoduleStatus.Join().IsDirty)))
                     {
-                        item.SubmoduleStatus.Result.Status = SubmoduleStatus.Unknown;
+                        item.SubmoduleStatus.Join().Status = SubmoduleStatus.Unknown;
                     }
                     Unstaged.GitItemStatuses = unStagedFiles;
                     Unstaged.ClearSelected();
@@ -2509,15 +2511,18 @@ namespace GitUI.CommandsDialogs
         private void openSubmoduleMenuItem_Click(object sender, EventArgs e)
         {
             var submoduleName = Unstaged.SelectedItem.Name;
-            Unstaged.SelectedItem.SubmoduleStatus.ContinueWith(
-                    (t) =>
-                    {
-                        Process process = new Process();
-                        process.StartInfo.FileName = Application.ExecutablePath;
-                        process.StartInfo.Arguments = "browse -commit=" + t.Result.Commit;
-                        process.StartInfo.WorkingDirectory = _fullPathResolver.Resolve(submoduleName.EnsureTrailingPathSeparator());
-                        process.Start();
-                    });
+
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                async () =>
+                {
+                    var status = await Unstaged.SelectedItem.SubmoduleStatus.Task.ConfigureAwait(false);
+
+                    Process process = new Process();
+                    process.StartInfo.FileName = Application.ExecutablePath;
+                    process.StartInfo.Arguments = "browse -commit=" + status.Commit;
+                    process.StartInfo.WorkingDirectory = _fullPathResolver.Resolve(submoduleName.EnsureTrailingPathSeparator());
+                    process.Start();
+                });
         }
 
         private void resetSubmoduleChanges_Click(object sender, EventArgs e)
@@ -2735,7 +2740,7 @@ namespace GitUI.CommandsDialogs
 
                 var formsTaskScheduler = TaskScheduler.FromCurrentSynchronizationContext();
 
-                Task.Factory.StartNew(() =>
+                Task.Run(() =>
                     {
                         gitProcess.WaitForExit();
                         gitProcess.Dispose();
@@ -2812,7 +2817,7 @@ namespace GitUI.CommandsDialogs
             {
                 return;
             }
-            UpdateBranchNameDisplay();
+            ThreadHelper.JoinableTaskFactory.RunAsync(() => UpdateBranchNameDisplayAsync());
         }
 
         private void Message_Enter(object sender, EventArgs e)

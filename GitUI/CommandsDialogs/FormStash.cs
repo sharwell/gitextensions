@@ -104,13 +104,13 @@ namespace GitUI.CommandsDialogs
             else if(gitStash == currentWorkingDirStashItem)
             {
                 toolStripButton_customMessage.Enabled = true;
-                _asyncLoader.Load(() => Module.GetAllChangedFiles(), LoadGitItemStatuses);
+                _asyncLoader.LoadAsync(() => Module.GetAllChangedFiles(), LoadGitItemStatuses);
                 Clear.Enabled = false; // disallow Drop  (of current working directory)
                 Apply.Enabled = false; // disallow Apply (of current working directory)
             }
             else
             {
-                _asyncLoader.Load(() => Module.GetStashDiffFiles(gitStash.Name), LoadGitItemStatuses);
+                _asyncLoader.LoadAsync(() => Module.GetStashDiffFiles(gitStash.Name), LoadGitItemStatuses);
                 Clear.Enabled = true; // allow Drop
                 Apply.Enabled = true; // allow Apply
             }

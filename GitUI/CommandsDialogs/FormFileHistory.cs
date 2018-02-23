@@ -134,7 +134,7 @@ namespace GitUI.CommandsDialogs
         {
             FileChanges.Visible = true;
 
-            _asyncLoader.Load(() => BuildFilter(FileName), (filter) =>
+            _asyncLoader.LoadAsync(() => BuildFilter(FileName), (filter) =>
             {
                 if (filter == null)
                     return;

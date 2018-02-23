@@ -90,7 +90,7 @@ namespace GitUI.CommandsDialogs
         {
             string  _selectedText = textBox1.Text;
 
-            backgroundLoader.Load(() => getCandidates(_selectedText), SearchForCandidates);
+            backgroundLoader.LoadAsync(() => getCandidates(_selectedText), SearchForCandidates);
         }
 
         private void textBox1_KeyUp(object sender, KeyEventArgs e)

@@ -17,6 +17,7 @@ using GitUI.HelperDialogs;
 using GitUI.RevisionGridClasses;
 using GitUIPluginInterfaces;
 using GitUIPluginInterfaces.BuildServerIntegration;
+using Microsoft.VisualStudio.Threading;
 
 namespace GitUI.BuildServerIntegration
 {
@@ -44,53 +45,57 @@ namespace GitUI.BuildServerIntegration
 
         public void LaunchBuildServerInfoFetchOperation()
         {
+            Debug.Assert(ThreadHelper.JoinableTaskContext.IsOnMainThread);
+
             CancelBuildStatusFetchOperation();
 
             DisposeBuildServerAdapter();
 
             // Extract the project name from the last part of the directory path. It is assumed that it matches the project name in the CI build server.
-            GetBuildServerAdapterAsync().ContinueWith((Task<IBuildServerAdapter> task) =>
-            {
-                if (revisions.IsDisposed)
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                async () =>
                 {
-                    return;
-                }
+                    buildServerAdapter = await GetBuildServerAdapterAsync().ConfigureAwait(false);
 
-                buildServerAdapter = task.Result;
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-                UpdateUI();
+                    if (revisions.IsDisposed)
+                    {
+                        return;
+                    }
 
-                if (buildServerAdapter == null)
-                    return;
+                    UpdateUI();
 
-                var scheduler = NewThreadScheduler.Default;
-                var fullDayObservable = buildServerAdapter.GetFinishedBuildsSince(scheduler, DateTime.Today - TimeSpan.FromDays(3));
-                var fullObservable = buildServerAdapter.GetFinishedBuildsSince(scheduler);
-                var fromNowObservable = buildServerAdapter.GetFinishedBuildsSince(scheduler, DateTime.Now);
-                var runningBuildsObservable = buildServerAdapter.GetRunningBuilds(scheduler);
+                    if (buildServerAdapter == null)
+                        return;
 
-                var cancellationToken = new CompositeDisposable
-                {
-                    fullDayObservable.OnErrorResumeNext(fullObservable)
-                                     .OnErrorResumeNext(Observable.Empty<BuildInfo>()
-                                                                  .DelaySubscription(TimeSpan.FromMinutes(1))
-                                                                  .OnErrorResumeNext(fromNowObservable)
-                                                                  .Retry()
-                                                                  .Repeat())
-                                     .ObserveOn(SynchronizationContext.Current)
-                                     .Subscribe(OnBuildInfoUpdate),
+                    var scheduler = NewThreadScheduler.Default;
+                    var fullDayObservable = buildServerAdapter.GetFinishedBuildsSince(scheduler, DateTime.Today - TimeSpan.FromDays(3));
+                    var fullObservable = buildServerAdapter.GetFinishedBuildsSince(scheduler);
+                    var fromNowObservable = buildServerAdapter.GetFinishedBuildsSince(scheduler, DateTime.Now);
+                    var runningBuildsObservable = buildServerAdapter.GetRunningBuilds(scheduler);
 
-                    runningBuildsObservable.OnErrorResumeNext(Observable.Empty<BuildInfo>()
-                                                                        .DelaySubscription(TimeSpan.FromSeconds(10)))
-                                           .Retry()
-                                           .Repeat()
-                                           .ObserveOn(SynchronizationContext.Current)
-                                           .Subscribe(OnBuildInfoUpdate)
-                };
+                    var cancellationToken = new CompositeDisposable
+                    {
+                        fullDayObservable.OnErrorResumeNext(fullObservable)
+                                         .OnErrorResumeNext(Observable.Empty<BuildInfo>()
+                                                                      .DelaySubscription(TimeSpan.FromMinutes(1))
+                                                                      .OnErrorResumeNext(fromNowObservable)
+                                                                      .Retry()
+                                                                      .Repeat())
+                                         .ObserveOn(SynchronizationContext.Current)
+                                         .Subscribe(OnBuildInfoUpdate),
 
-                buildStatusCancellationToken = cancellationToken;
-            },
-            TaskScheduler.FromCurrentSynchronizationContext());
+                        runningBuildsObservable.OnErrorResumeNext(Observable.Empty<BuildInfo>()
+                                                                            .DelaySubscription(TimeSpan.FromSeconds(10)))
+                                               .Retry()
+                                               .Repeat()
+                                               .ObserveOn(SynchronizationContext.Current)
+                                               .Subscribe(OnBuildInfoUpdate)
+                    };
+
+                    buildStatusCancellationToken = cancellationToken;
+                });
         }
 
         public void CancelBuildStatusFetchOperation()
@@ -280,7 +285,7 @@ namespace GitUI.BuildServerIntegration
 
         private Task<IBuildServerAdapter> GetBuildServerAdapterAsync()
         {
-            return Task<IBuildServerAdapter>.Factory.StartNew(() =>
+            return Task<IBuildServerAdapter>.Run(() =>
             {
                 if (!Module.EffectiveSettings.BuildServer.EnableIntegration.ValueOrDefault)
                     return null;
@@ -360,6 +365,64 @@ namespace GitUI.BuildServerIntegration
         {
             var fileName = string.Format("BuildServer-{0}.options", Convert.ToBase64String(Encoding.UTF8.GetBytes(buildServerAdapter.UniqueKey)));
             return new IsolatedStorageFileStream(fileName, FileMode.OpenOrCreate, fileAccess, fileShare);
+        }
+
+        private sealed class MainThreadScheduler : LocalScheduler
+        {
+            internal static readonly MainThreadScheduler Instance = new MainThreadScheduler();
+
+            public override IDisposable Schedule<TState>(TState state, TimeSpan dueTime, Func<IScheduler, TState, IDisposable> action)
+            {
+                var disposable = new SingleAssignmentDisposable();
+                var normalizedTime = Scheduler.Normalize(dueTime);
+                ThreadHelper.JoinableTaskFactory.RunAsync(
+                    async () =>
+                    {
+                        await Task.Delay(normalizedTime).ConfigureAwait(false);
+                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                        disposable.Disposable = new MainThreadDisposable(action(this, state));
+                    });
+                return disposable;
+            }
+        }
+
+        private sealed class MainThreadDisposable : ICancelable, IDisposable
+        {
+            private readonly IDisposable disposable;
+
+            public MainThreadDisposable(IDisposable disposable)
+            {
+                this.disposable = disposable;
+            }
+
+            public bool IsDisposed
+            {
+                get;
+                private set;
+            }
+
+            public void Dispose()
+            {
+                if (IsDisposed)
+                {
+                    return;
+                }
+
+                if (!ThreadHelper.JoinableTaskContext.IsOnMainThread)
+                {
+                    ThreadHelper.JoinableTaskFactory.Run(
+                        async () =>
+                        {
+                            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                            Dispose();
+                        });
+
+                    return;
+                }
+
+                disposable.Dispose();
+                IsDisposed = true;
+            }
         }
     }
 }

@@ -6,21 +6,24 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Serialization;
+using GitUI;
+using Microsoft.VisualStudio.Threading;
 
 namespace GitCommands.Repository
 {
     public static class Repositories
     {
-        private static Task<RepositoryHistory> _repositoryHistory;
+        private static AsyncLazy<RepositoryHistory> _repositoryHistory;
         private static RepositoryHistory _remoteRepositoryHistory;
         private static BindingList<RepositoryCategory> _repositoryCategories;
 
         public static Task<RepositoryHistory> LoadRepositoryHistoryAsync()
         {
             if (_repositoryHistory != null)
-                return _repositoryHistory;
-            _repositoryHistory = Task.Factory.StartNew(() => LoadRepositoryHistory());
-            return _repositoryHistory;
+                return _repositoryHistory.GetValueAsync();
+
+            _repositoryHistory = new AsyncLazy<RepositoryHistory>(() => Task.Run(() => LoadRepositoryHistory()), ThreadHelper.JoinableTaskFactory);
+            return _repositoryHistory.GetValueAsync();
         }
 
         private static RepositoryHistory LoadRepositoryHistory()
@@ -64,9 +67,14 @@ namespace GitCommands.Repository
         {
             get
             {
-                if (_repositoryHistory == null)
-                    LoadRepositoryHistoryAsync();
-                return _repositoryHistory.Result;
+                if (_repositoryHistory?.IsValueFactoryCompleted ?? false)
+                {
+#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
+                    return _repositoryHistory.GetValueAsync().Result;
+#pragma warning restore VSTHRD002 // Avoid problematic synchronous waits
+                }
+
+                return ThreadHelper.JoinableTaskFactory.Run(() => LoadRepositoryHistoryAsync());
             }
         }
 
@@ -74,8 +82,8 @@ namespace GitCommands.Repository
         {
             get
             {
-                if (_repositoryHistory != null && _repositoryHistory.Status == TaskStatus.Running)
-                    _repositoryHistory.Wait();
+                if (_repositoryHistory != null && !_repositoryHistory.IsValueFactoryCompleted)
+                    ThreadHelper.JoinableTaskFactory.Run(() => _repositoryHistory.GetValueAsync());
 
                 int size = AppSettings.RecentRepositoriesHistorySize;
                 if (_remoteRepositoryHistory == null)
@@ -243,7 +251,7 @@ namespace GitCommands.Repository
         public static void SaveSettings()
         {
             if (_repositoryHistory != null)
-                AppSettings.SetString("history", SerializeHistoryIntoXml(_repositoryHistory.Result));
+                AppSettings.SetString("history", SerializeHistoryIntoXml(RepositoryHistory));
             if (_remoteRepositoryHistory != null)
                 AppSettings.SetString("history remote", SerializeHistoryIntoXml(_remoteRepositoryHistory));
             if (_repositoryCategories != null)

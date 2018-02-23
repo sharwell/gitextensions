@@ -5,18 +5,19 @@ using System.Threading;
 using System.Windows.Forms;
 using GitCommands;
 using ResourceManager;
+using Microsoft.VisualStudio.Threading;
 
 namespace GitUI.CommandsDialogs.BrowseDialog
 {
     public sealed partial class FormGitLog : GitExtensionsForm
     {
-        private readonly SynchronizationContext syncContext;
-
         private FormGitLog()
             : base(true)
         {
+            if (!ThreadHelper.JoinableTaskContext.IsOnMainThread)
+                throw new InvalidOperationException();
+
             ShowInTaskbar = true;
-            syncContext = SynchronizationContext.Current;
             InitializeComponent();
             Translate();
         }
@@ -103,12 +104,22 @@ namespace GitUI.CommandsDialogs.BrowseDialog
 
         private void OnCommandsLogChanged(object sender, EventArgs e)
         {
-            syncContext.Post(_ => RefreshLogItems(), null);
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                async () =>
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    RefreshLogItems();
+                });
         }
 
         private void OnCachedCommandsLogChanged(object sender, EventArgs e)
         {
-            syncContext.Post(_ => RefreshCommandCacheItems(), null);
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                async () =>
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    RefreshCommandCacheItems();
+                });
         }
 
         #region Single instance static members

@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using GitCommands;
+using Microsoft.VisualStudio.Threading;
 
 namespace GitUI.AutoCompletion
 {
@@ -20,43 +21,41 @@ namespace GitUI.AutoCompletion
             _module = module;
         }
 
-        public Task<IEnumerable<AutoCompleteWord>> GetAutoCompleteWordsAsync (CancellationToken cancellationToken)
+        public async Task<IEnumerable<AutoCompleteWord>> GetAutoCompleteWordsAsync (CancellationToken cancellationToken)
         {
-            return Task.Factory.StartNew(
-                    () =>
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
+            await TaskScheduler.Default.SwitchTo(alwaysYield: true);
 
-                        var autoCompleteWords = new HashSet<string>();
+            cancellationToken.ThrowIfCancellationRequested();
 
-                        foreach (var file in _module.GetAllChangedFiles())
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
+            var autoCompleteWords = new HashSet<string>();
 
-                            var regex = GetRegexForExtension(Path.GetExtension(file.Name));
+            foreach (var file in _module.GetAllChangedFiles())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
 
-                            if (regex != null)
-                            {
-                                var text = GetChangedFileText(_module, file);
-                                var matches = regex.Matches(text);
-                                foreach (Match match in matches)
-                                        // Skip first group since it always contains the entire matched string (regardless of capture groups)
-                                    foreach (Group @group in match.Groups.OfType<Group>().Skip(1))
-                                        foreach (Capture capture in @group.Captures)
-                                            autoCompleteWords.Add(capture.Value);
-                            }
+                var regex = GetRegexForExtension(Path.GetExtension(file.Name));
 
-                            autoCompleteWords.Add(Path.GetFileNameWithoutExtension(file.Name));
-                            autoCompleteWords.Add(Path.GetFileName(file.Name));
-                            if (!string.IsNullOrWhiteSpace(file.OldName))
-                            {
-                                autoCompleteWords.Add(Path.GetFileNameWithoutExtension(file.OldName));
-                                autoCompleteWords.Add(Path.GetFileName(file.OldName));
-                            }
-                        }
+                if (regex != null)
+                {
+                    var text = GetChangedFileText(_module, file);
+                    var matches = regex.Matches(text);
+                    foreach (Match match in matches)
+                            // Skip first group since it always contains the entire matched string (regardless of capture groups)
+                        foreach (Group @group in match.Groups.OfType<Group>().Skip(1))
+                            foreach (Capture capture in @group.Captures)
+                                autoCompleteWords.Add(capture.Value);
+                }
 
-                        return autoCompleteWords.Select(w => new AutoCompleteWord(w));
-                    }, cancellationToken);
+                autoCompleteWords.Add(Path.GetFileNameWithoutExtension(file.Name));
+                autoCompleteWords.Add(Path.GetFileName(file.Name));
+                if (!string.IsNullOrWhiteSpace(file.OldName))
+                {
+                    autoCompleteWords.Add(Path.GetFileNameWithoutExtension(file.OldName));
+                    autoCompleteWords.Add(Path.GetFileName(file.OldName));
+                }
+            }
+
+            return autoCompleteWords.Select(w => new AutoCompleteWord(w));
         }
 
         private static Regex GetRegexForExtension (string extension)

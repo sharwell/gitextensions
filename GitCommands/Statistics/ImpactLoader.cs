@@ -118,7 +118,7 @@ namespace GitCommands.Statistics
 
             string command = "log --pretty=tformat:\"--- %ad --- " + authorName + "\" --numstat --date=iso -C --all --no-merges";
 
-            tasks.Add(Task.Factory.StartNew(() => LoadModuleInfo(command, Module, token), token));
+            tasks.Add(Task.Run(() => LoadModuleInfo(command, Module, token), token));
 
             if (ShowSubmodules)
             {
@@ -127,7 +127,7 @@ namespace GitCommands.Statistics
                 {
                     IGitModule submodule = Module.GetSubmodule(submoduleName);
                     if (submodule.IsValidGitWorkingDir())
-                        tasks.Add(Task.Factory.StartNew(() => LoadModuleInfo(command, submodule, token), token));
+                        tasks.Add(Task.Run(() => LoadModuleInfo(command, submodule, token), token));
                 }
             }
             return tasks.ToArray();
