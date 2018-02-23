@@ -49,7 +49,7 @@ namespace GitUI.BuildServerIntegration
             DisposeBuildServerAdapter();
 
             // Extract the project name from the last part of the directory path. It is assumed that it matches the project name in the CI build server.
-            GetBuildServerAdapter().ContinueWith((Task<IBuildServerAdapter> task) =>
+            GetBuildServerAdapterAsync().ContinueWith((Task<IBuildServerAdapter> task) =>
             {
                 if (revisions.IsDisposed)
                 {
@@ -278,7 +278,7 @@ namespace GitUI.BuildServerIntegration
             }
         }
 
-        private Task<IBuildServerAdapter> GetBuildServerAdapter()
+        private Task<IBuildServerAdapter> GetBuildServerAdapterAsync()
         {
             return Task<IBuildServerAdapter>.Factory.StartNew(() =>
             {
