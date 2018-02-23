@@ -4,11 +4,9 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
 using System.Linq;
 using System.Reactive.Linq;
 using System.Text.RegularExpressions;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GitCommands;
@@ -121,7 +119,7 @@ namespace GitUI
                     h => FileStatusListView.SelectedIndexChanged -= h)
                     .Where(x => _enableSelectedIndexChangeEvent)
                     .Throttle(SelectedIndexChangeThrottleDuration)
-                    .ObserveOn(SynchronizationContext.Current)
+                    .ObserveOn(MainThreadScheduler.Instance)
                     .Subscribe(_ => FileStatusListView_SelectedIndexChanged());
             }
         }

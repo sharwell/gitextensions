@@ -15,9 +15,9 @@ using GitCommands;
 using GitCommands.Config;
 using GitUI.HelperDialogs;
 using GitUI.RevisionGridClasses;
+using GitUI.UserControls;
 using GitUIPluginInterfaces;
 using GitUIPluginInterfaces.BuildServerIntegration;
-using Microsoft.VisualStudio.Threading;
 
 namespace GitUI.BuildServerIntegration
 {
@@ -83,14 +83,14 @@ namespace GitUI.BuildServerIntegration
                                                                       .OnErrorResumeNext(fromNowObservable)
                                                                       .Retry()
                                                                       .Repeat())
-                                         .ObserveOn(SynchronizationContext.Current)
+                                         .ObserveOn(MainThreadScheduler.Instance)
                                          .Subscribe(OnBuildInfoUpdate),
 
                         runningBuildsObservable.OnErrorResumeNext(Observable.Empty<BuildInfo>()
                                                                             .DelaySubscription(TimeSpan.FromSeconds(10)))
                                                .Retry()
                                                .Repeat()
-                                               .ObserveOn(SynchronizationContext.Current)
+                                               .ObserveOn(MainThreadScheduler.Instance)
                                                .Subscribe(OnBuildInfoUpdate)
                     };
 
@@ -365,64 +365,6 @@ namespace GitUI.BuildServerIntegration
         {
             var fileName = string.Format("BuildServer-{0}.options", Convert.ToBase64String(Encoding.UTF8.GetBytes(buildServerAdapter.UniqueKey)));
             return new IsolatedStorageFileStream(fileName, FileMode.OpenOrCreate, fileAccess, fileShare);
-        }
-
-        private sealed class MainThreadScheduler : LocalScheduler
-        {
-            internal static readonly MainThreadScheduler Instance = new MainThreadScheduler();
-
-            public override IDisposable Schedule<TState>(TState state, TimeSpan dueTime, Func<IScheduler, TState, IDisposable> action)
-            {
-                var disposable = new SingleAssignmentDisposable();
-                var normalizedTime = Scheduler.Normalize(dueTime);
-                ThreadHelper.JoinableTaskFactory.RunAsync(
-                    async () =>
-                    {
-                        await Task.Delay(normalizedTime).ConfigureAwait(false);
-                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                        disposable.Disposable = new MainThreadDisposable(action(this, state));
-                    });
-                return disposable;
-            }
-        }
-
-        private sealed class MainThreadDisposable : ICancelable, IDisposable
-        {
-            private readonly IDisposable disposable;
-
-            public MainThreadDisposable(IDisposable disposable)
-            {
-                this.disposable = disposable;
-            }
-
-            public bool IsDisposed
-            {
-                get;
-                private set;
-            }
-
-            public void Dispose()
-            {
-                if (IsDisposed)
-                {
-                    return;
-                }
-
-                if (!ThreadHelper.JoinableTaskContext.IsOnMainThread)
-                {
-                    ThreadHelper.JoinableTaskFactory.Run(
-                        async () =>
-                        {
-                            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                            Dispose();
-                        });
-
-                    return;
-                }
-
-                disposable.Dispose();
-                IsDisposed = true;
-            }
         }
     }
 }
