@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using GitUI;
 using GitUIPluginInterfaces;
 
@@ -114,15 +115,22 @@ namespace GitCommands
 
         public void Execute()
         {
-            ThreadHelper.JoinableTaskFactory.RunAsync(() => _backgroundLoader.LoadAsync(ProccessGitLog, ProccessGitLogExecuted));
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                () => _backgroundLoader.LoadAsync(
+                    ProccessGitLogAsync,
+                    () =>
+                    {
+                        ProccessGitLogExecuted();
+                        return Task.CompletedTask;
+                    }));
         }
 
-        private void ProccessGitLog(CancellationToken taskState)
+        private async Task ProccessGitLogAsync(CancellationToken taskState)
         {
             RevisionCount = 0;
             if (Updated != null)
                 Updated(this, new RevisionGraphUpdatedEventArgs(null));
-            _refs = GetRefs().ToDictionaryOfList(head => head.Guid);
+            _refs = (await GetRefsAsync().ConfigureAwait(false)).ToDictionaryOfList(head => head.Guid);
 
             string formatString =
                 /* <COMMIT>       */ CommitBegin + "%n" +
@@ -269,11 +277,11 @@ namespace GitCommands
                 Exited(this, EventArgs.Empty);
         }
 
-        private IList<IGitRef> GetRefs()
+        private async Task<IList<IGitRef>> GetRefsAsync()
         {
-            var result = _module.GetRefs(true);
+            var result = await _module.GetRefsAsync(true).ConfigureAwait(false);
             bool validWorkingDir = _module.IsValidGitWorkingDir();
-            _selectedBranchName = validWorkingDir ? _module.GetSelectedBranch() : string.Empty;
+            _selectedBranchName = validWorkingDir ? await _module.GetSelectedBranchAsync().ConfigureAwait(false) : string.Empty;
             var selectedRef = result.FirstOrDefault(head => head.Name == _selectedBranchName);
 
             if (selectedRef != null)

@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using System.Threading.Tasks;
 using GitCommands;
 using JetBrains.Annotations;
 using ResourceManager.CommitDataRenders;
@@ -69,7 +70,7 @@ namespace ResourceManager
             return datetime.LocalDateTime.ToString("G");
         }
 
-        public static string GetSubmoduleText(GitModule superproject, string name, string hash)
+        public static async Task<string> GetSubmoduleTextAsync(GitModule superproject, string name, string hash)
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("Submodule " + name);
@@ -80,8 +81,7 @@ namespace ResourceManager
                 // TEMP, will be moved in the follow up refactor
                 ICommitDataManager commitDataManager = new CommitDataManager(() => module);
 
-                string error = "";
-                CommitData data = commitDataManager.GetCommitData(hash, ref error);
+                (CommitData data, string error) = await commitDataManager.GetCommitDataAsync(hash).ConfigureAwait(false);
                 if (data == null)
                 {
                     sb.AppendLine("Commit hash:\t" + hash);
@@ -98,16 +98,17 @@ namespace ResourceManager
             return sb.ToString();
         }
 
-        public static string ProcessSubmodulePatch(GitModule module, string fileName, PatchApply.Patch patch)
+        public static async Task<string> ProcessSubmodulePatchAsync(GitModule module, string fileName, PatchApply.Patch patch)
         {
             string text = patch != null ? patch.Text : null;
-            var status = GitCommandHelpers.GetSubmoduleStatus(text, module, fileName);
+            var status = await GitCommandHelpers.GetSubmoduleStatusAsync(text, module, fileName).ConfigureAwait(false);
             if (status == null)
                 return "";
-            return ProcessSubmoduleStatus(module, status);
+
+            return await ProcessSubmoduleStatusAsync(module, status).ConfigureAwait(false);
         }
 
-        public static string ProcessSubmoduleStatus([NotNull] GitModule module, [NotNull] GitSubmoduleStatus status)
+        public static async Task<string> ProcessSubmoduleStatusAsync([NotNull] GitModule module, [NotNull] GitSubmoduleStatus status)
         {
             if (module == null)
                 throw new ArgumentNullException("module");
@@ -128,7 +129,7 @@ namespace ResourceManager
                 string error = "";
                 if (status.OldCommit != null)
                 {
-                    oldCommitData = commitDataManager.GetCommitData(status.OldCommit, ref error);
+                    (oldCommitData, error) = await commitDataManager.GetCommitDataAsync(status.OldCommit).ConfigureAwait(false);
                 }
 
                 if (oldCommitData != null)
@@ -154,7 +155,7 @@ namespace ResourceManager
                 string error = "";
                 if (status.Commit != null)
                 {
-                    commitData = commitDataManager.GetCommitData(status.Commit, ref error);
+                    (commitData, error) = await commitDataManager.GetCommitDataAsync(status.Commit).ConfigureAwait(false);
                 }
 
                 if (commitData != null)
@@ -172,7 +173,7 @@ namespace ResourceManager
             }
 
             sb.AppendLine();
-            var submoduleStatus = gitmodule.CheckSubmoduleStatus(status.Commit, status.OldCommit, commitData, oldCommitData);
+            var submoduleStatus = await gitmodule.CheckSubmoduleStatusAsync(status.Commit, status.OldCommit, commitData, oldCommitData).ConfigureAwait(false);
             sb.Append("Type: ");
             switch (submoduleStatus)
             {
@@ -222,7 +223,7 @@ namespace ResourceManager
             {
                 if (status.IsDirty)
                 {
-                    string statusText = gitmodule.GetStatusText(false);
+                    string statusText = await gitmodule.GetStatusTextAsync(false).ConfigureAwait(false);
                     if (!String.IsNullOrEmpty(statusText))
                     {
                         sb.AppendLine("\nStatus:");
@@ -230,7 +231,7 @@ namespace ResourceManager
                     }
                 }
 
-                string diffs = gitmodule.GetDiffFilesText(status.OldCommit, status.Commit);
+                string diffs = await gitmodule.GetDiffFilesTextAsync(status.OldCommit, status.Commit).ConfigureAwait(false);
                 if (!String.IsNullOrEmpty(diffs))
                 {
                     sb.AppendLine("\nDifferences:");

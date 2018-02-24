@@ -1,11 +1,12 @@
 ﻿using System;
+using System.Threading.Tasks;
 using GitUIPluginInterfaces;
 
 namespace GitCommands.Git
 {
     public interface IGitRevisionProvider
     {
-        GitRevision Get(string sha1);
+        Task<GitRevision> GetAsync(string sha1);
     }
 
     public sealed class GitRevisionProvider : IGitRevisionProvider
@@ -19,7 +20,7 @@ namespace GitCommands.Git
         }
 
 
-        public GitRevision Get(string sha1)
+        public async Task<GitRevision> GetAsync(string sha1)
         {
             if (sha1.IsNullOrWhiteSpace() || sha1.Length >= 40)
             {
@@ -27,7 +28,8 @@ namespace GitCommands.Git
             }
 
             var module = GetModule();
-            if (module.IsExistingCommitHash(sha1, out var fullSha1))
+            var (success, fullSha1) = await module.IsExistingCommitHashAsync(sha1).ConfigureAwait(false);
+            if (success)
             {
                 sha1 = fullSha1;
             }

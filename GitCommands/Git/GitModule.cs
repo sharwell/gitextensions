@@ -303,7 +303,7 @@ namespace GitCommands
                     const string controlStr = "ą"; // "a caudata"
                     string arguments = string.Format("config --get {0}", controlStr);
 
-                    String s = new GitModule("").RunGitCmd(arguments, Encoding.UTF8);
+                    String s = ThreadHelper.JoinableTaskFactory.Run(() => new GitModule("").RunGitCmdAsync(arguments, Encoding.UTF8));
                     if (s != null && s.IndexOf(controlStr) != -1)
                         _systemEncoding = new UTF8Encoding(false);
                     else
@@ -412,9 +412,9 @@ namespace GitCommands
         /// </summary>
         /// <param name="relativePath">A path relative to the .git directory</param>
         /// <returns></returns>
-        public string ResolveGitInternalPath(string relativePath)
+        public async Task<string> ResolveGitInternalPathAsync(string relativePath)
         {
-            string gitPath = RunGitCmd("rev-parse --git-path " + relativePath.Quote());
+            string gitPath = await RunGitCmdAsync("rev-parse --git-path " + relativePath.Quote()).ConfigureAwait(false);
             string systemPath = PathUtil.ToNativePath(gitPath.Trim());
             if (systemPath.StartsWith(".git\\"))
             {
@@ -434,7 +434,7 @@ namespace GitCommands
             {
                 if (_GitCommonDirectory == null)
                 {
-                    var commDir = RunGitCmdResult("rev-parse --git-common-dir");
+                    var commDir = ThreadHelper.JoinableTaskFactory.Run(() => RunGitCmdResultAsync("rev-parse --git-common-dir"));
                     _GitCommonDirectory = PathUtil.ToNativePath(commDir.StdOutput.Trim());
                     if (!commDir.ExitedSuccessfully || _GitCommonDirectory == ".git" || !Directory.Exists(_GitCommonDirectory))
                     {
@@ -467,9 +467,9 @@ namespace GitCommands
             return repositoryPath == GetGitDirectory(repositoryPath);
         }
 
-        public bool IsSubmodule(string submodulePath)
+        public async Task<bool> IsSubmoduleAsync(string submodulePath)
         {
-            var result = RunGitCmdResult("submodule status " + submodulePath);
+            var result = await RunGitCmdResultAsync("submodule status " + submodulePath).ConfigureAwait(false);
 
             if (result.ExitCode == 0
                 // submodule removed
@@ -638,7 +638,7 @@ namespace GitCommands
         /// Run command, cache results, console window is hidden, wait for exit, redirect output
         /// </summary>
         [PermissionSet(SecurityAction.Demand, Name = "FullTrust")]
-        public string RunCacheableCmd(string cmd, string arguments = "", Encoding encoding = null)
+        public async Task<string> RunCacheableCmdAsync(string cmd, string arguments = "", Encoding encoding = null)
         {
             if (encoding == null)
                 encoding = SystemEncoding;
@@ -647,7 +647,7 @@ namespace GitCommands
             if (GitCommandCache.TryGet(arguments, out cmdout, out cmderr))
                 return StripAnsiCodes(EncodingHelper.DecodeString(cmdout, cmderr, ref encoding));
 
-            GitCommandHelpers.RunCmdByte(cmd, arguments, _workingDir, null, out cmdout, out cmderr);
+            (_, cmdout, cmderr) = await GitCommandHelpers.RunCmdByteAsync(cmd, arguments, _workingDir, null).ConfigureAwait(false);
 
             GitCommandCache.Add(arguments, cmdout, cmderr);
 
@@ -658,10 +658,9 @@ namespace GitCommands
         /// Run command, console window is hidden, wait for exit, redirect output
         /// </summary>
         [PermissionSet(SecurityAction.Demand, Name = "FullTrust")]
-        public CmdResult RunCmdResult(string cmd, string arguments, Encoding encoding = null, byte[] stdInput = null)
+        public async Task<CmdResult> RunCmdResultAsync(string cmd, string arguments, Encoding encoding = null, byte[] stdInput = null)
         {
-            byte[] output, error;
-            int exitCode = GitCommandHelpers.RunCmdByte(cmd, arguments, _workingDir, stdInput, out output, out error);
+            var (exitCode, output, error) = await GitCommandHelpers.RunCmdByteAsync(cmd, arguments, _workingDir, stdInput);
             if (encoding == null)
                 encoding = SystemEncoding;
             return new CmdResult
@@ -676,25 +675,25 @@ namespace GitCommands
         /// Run command, console window is hidden, wait for exit, redirect output
         /// </summary>
         [PermissionSet(SecurityAction.Demand, Name = "FullTrust")]
-        public string RunCmd(string cmd, string arguments, Encoding encoding = null, byte[] stdInput = null)
+        public async Task<string> RunCmdAsync(string cmd, string arguments, Encoding encoding = null, byte[] stdInput = null)
         {
-            return RunCmdResult(cmd, arguments, encoding, stdInput).GetString();
+            return (await RunCmdResultAsync(cmd, arguments, encoding, stdInput).ConfigureAwait(false)).GetString();
         }
 
         /// <summary>
         /// Run git command, console window is hidden, wait for exit, redirect output
         /// </summary>
-        public string RunGitCmd(string arguments, Encoding encoding = null, byte[] stdInput = null)
+        public async Task<string> RunGitCmdAsync(string arguments, Encoding encoding = null, byte[] stdInput = null)
         {
-            return RunCmd(AppSettings.GitCommand, arguments, encoding, stdInput);
+            return await RunCmdAsync(AppSettings.GitCommand, arguments, encoding, stdInput).ConfigureAwait(false);
         }
 
         /// <summary>
         /// Run git command, console window is hidden, wait for exit, redirect output
         /// </summary>
-        public CmdResult RunGitCmdResult(string arguments, Encoding encoding = null, byte[] stdInput = null)
+        public async Task<CmdResult> RunGitCmdResultAsync(string arguments, Encoding encoding = null, byte[] stdInput = null)
         {
-            return RunCmdResult(AppSettings.GitCommand, arguments, encoding, stdInput);
+            return await RunCmdResultAsync(AppSettings.GitCommand, arguments, encoding, stdInput).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -717,25 +716,25 @@ namespace GitCommands
         /// <summary>
         /// Run batch file, console window is hidden, wait for exit, redirect output
         /// </summary>
-        public string RunBatchFile(string batchFile)
+        public async Task<string> RunBatchFileAsync(string batchFile)
         {
             string tempFileName = Path.ChangeExtension(Path.GetTempFileName(), ".cmd");
             using (var writer = new StreamWriter(tempFileName))
             {
-                writer.WriteLine("@prompt $G");
-                writer.Write(batchFile);
+                await writer.WriteLineAsync("@prompt $G").ConfigureAwait(false);
+                await writer.WriteAsync(batchFile).ConfigureAwait(false);
             }
-            string result = RunCmd("cmd.exe", "/C \"" + tempFileName + "\"");
+            string result = await RunCmdAsync("cmd.exe", "/C \"" + tempFileName + "\"").ConfigureAwait(false);
             File.Delete(tempFileName);
             return result;
         }
 
-        public void EditNotes(string revision)
+        public async Task EditNotesAsync(string revision)
         {
             string editor = GetEffectiveSetting("core.editor").ToLower();
             if (editor.Contains("gitextensions") || editor.Contains("notepad"))
             {
-                RunGitCmd("notes edit " + revision);
+                await RunGitCmdAsync("notes edit " + revision).ConfigureAwait(false);
             }
             else
             {
@@ -743,36 +742,36 @@ namespace GitCommands
             }
         }
 
-        public bool InTheMiddleOfConflictedMerge()
+        public async Task<bool> InTheMiddleOfConflictedMergeAsync()
         {
-            return !string.IsNullOrEmpty(RunGitCmd("ls-files -z --unmerged"));
+            return !string.IsNullOrEmpty(await RunGitCmdAsync("ls-files -z --unmerged").ConfigureAwait(false));
         }
 
-        public bool HandleConflictSelectSide(string fileName, string side)
+        public async Task<bool> HandleConflictSelectSideAsync(string fileName, string side)
         {
             Directory.SetCurrentDirectory(_workingDir);
             fileName = fileName.ToPosixPath();
 
             side = GetSide(side);
 
-            string result = RunGitCmd(String.Format("checkout-index -f --stage={0} -- \"{1}\"", side, fileName));
+            string result = await RunGitCmdAsync(String.Format("checkout-index -f --stage={0} -- \"{1}\"", side, fileName)).ConfigureAwait(false);
             if (!result.IsNullOrEmpty())
             {
                 return false;
             }
 
-            result = RunGitCmd(String.Format("add -- \"{0}\"", fileName));
+            result = await RunGitCmdAsync(String.Format("add -- \"{0}\"", fileName)).ConfigureAwait(false);
             return result.IsNullOrEmpty();
         }
 
-        public bool HandleConflictsSaveSide(string fileName, string saveAsFileName, string side)
+        public async Task<bool> HandleConflictsSaveSideAsync(string fileName, string saveAsFileName, string side)
         {
             Directory.SetCurrentDirectory(_workingDir);
             fileName = fileName.ToPosixPath();
 
             side = GetSide(side);
 
-            var result = RunGitCmd(String.Format("checkout-index --stage={0} --temp -- \"{1}\"", side, fileName));
+            var result = await RunGitCmdAsync(String.Format("checkout-index --stage={0} --temp -- \"{1}\"", side, fileName)).ConfigureAwait(false);
             if (result.IsNullOrEmpty())
             {
                 return false;
@@ -821,14 +820,14 @@ namespace GitCommands
             return retValue;
         }
 
-        public void SaveBlobAs(string saveAs, string blob)
+        public async Task SaveBlobAsAsync(string saveAs, string blob)
         {
             using (var ms = (MemoryStream)GetFileStream(blob)) //Ugly, has implementation info.
             {
                 byte[] buf = ms.ToArray();
                 if (EffectiveConfigFile.core.autocrlf.ValueOrDefault == AutoCRLFType.@true)
                 {
-                    if (!FileHelper.IsBinaryFile(this, saveAs) && !FileHelper.IsBinaryFileAccordingToContent(buf))
+                    if (!await FileHelper.IsBinaryFileAsync(this, saveAs).ConfigureAwait(false) && !FileHelper.IsBinaryFileAccordingToContent(buf))
                     {
                         buf = GitConvert.ConvertCrLfToWorktree(buf);
                     }
@@ -836,7 +835,7 @@ namespace GitCommands
 
                 using (FileStream fileOut = File.Create(saveAs))
                 {
-                    fileOut.Write(buf, 0, buf.Length);
+                    await fileOut.WriteAsync(buf, 0, buf.Length).ConfigureAwait(false);
                 }
             }
         }
@@ -852,7 +851,7 @@ namespace GitCommands
             return side;
         }
 
-        public string[] CheckoutConflictedFiles(ConflictData unmergedData)
+        public async Task<string[]> CheckoutConflictedFilesAsync(ConflictData unmergedData)
         {
             Directory.SetCurrentDirectory(_workingDir);
 
@@ -872,7 +871,7 @@ namespace GitCommands
                 if (unmerged[i] == null)
                     continue;
                 var tempFile =
-                    RunGitCmd("checkout-index --temp --stage=" + (i + 1) + " -- \"" + filename + "\"");
+                    await RunGitCmdAsync("checkout-index --temp --stage=" + (i + 1) + " -- \"" + filename + "\"").ConfigureAwait(false);
                 tempFile = tempFile.Split('\t')[0];
                 tempFile = Path.Combine(_workingDir, tempFile);
 
@@ -901,18 +900,18 @@ namespace GitCommands
             return fileNames;
         }
 
-        public ConflictData GetConflict(string filename)
+        public async Task<ConflictData> GetConflictAsync(string filename)
         {
-            return GetConflicts(filename).SingleOrDefault();
+            return (await GetConflictsAsync(filename).ConfigureAwait(false)).SingleOrDefault();
         }
 
-        public List<ConflictData> GetConflicts(string filename = "")
+        public async Task<List<ConflictData>> GetConflictsAsync(string filename = "")
         {
             filename = filename.ToPosixPath();
 
             var list = new List<ConflictData>();
 
-            var unmerged = RunGitCmd("ls-files -z --unmerged " + filename.QuoteNE()).Split(new[] { '\0', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var unmerged = (await RunGitCmdAsync("ls-files -z --unmerged " + filename.QuoteNE()).ConfigureAwait(false)).Split(new[] { '\0', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
             var item = new ConflictedFileData[3];
 
@@ -947,16 +946,16 @@ namespace GitCommands
             return list;
         }
 
-        public IList<string> GetSortedRefs()
+        public async Task<IList<string>> GetSortedRefsAsync()
         {
             string command = "for-each-ref --sort=-committerdate --sort=-taggerdate --format=\"%(refname)\" refs/";
 
-            var tree = RunGitCmd(command, SystemEncoding);
+            var tree = await RunGitCmdAsync(command, SystemEncoding).ConfigureAwait(false);
 
             return tree.Split();
         }
 
-        public Dictionary<IGitRef, IGitItem> GetSubmoduleItemsForEachRef(string filename, Func<IGitRef, bool> showRemoteRef)
+        public async Task<Dictionary<IGitRef, IGitItem>> GetSubmoduleItemsForEachRefAsync(string filename, Func<IGitRef, bool> showRemoteRef)
         {
             string command = GetSortedRefsCommand();
 
@@ -965,11 +964,17 @@ namespace GitCommands
 
             filename = filename.ToPosixPath();
 
-            var tree = RunGitCmd(command, SystemEncoding);
+            var tree = await RunGitCmdAsync(command, SystemEncoding).ConfigureAwait(false);
 
-            var refs = GetTreeRefs(tree);
+            var refs = await GetTreeRefsAsync(tree).ConfigureAwait(false);
 
-            return refs.Where(showRemoteRef).ToDictionary(r => r, r => GetSubmoduleCommitHash(filename, r.Name));
+            var dictionary = new Dictionary<IGitRef, IGitItem>();
+            foreach (var r in refs.Where(showRemoteRef))
+            {
+                dictionary.Add(r, await GetSubmoduleCommitHashAsync(filename, r.Name));
+            }
+
+            return dictionary;
         }
 
         private string GetSortedRefsCommand()
@@ -985,25 +990,25 @@ namespace GitCommands
             return null;
         }
 
-        private IGitItem GetSubmoduleCommitHash(string filename, string refName)
+        private async Task<IGitItem> GetSubmoduleCommitHashAsync(string filename, string refName)
         {
-            string str = RunGitCmd("ls-tree " + refName + " \"" + filename + "\"");
+            string str = await RunGitCmdAsync("ls-tree " + refName + " \"" + filename + "\"").ConfigureAwait(false);
             return _gitTreeParser.ParseSingle(str);
         }
 
-        public int? GetCommitCount(string parentHash, string childHash)
+        public async Task<int?> GetCommitCountAsync(string parentHash, string childHash)
         {
-            string result = RunGitCmd("rev-list " + parentHash + " ^" + childHash + " --count");
+            string result = await RunGitCmdAsync("rev-list " + parentHash + " ^" + childHash + " --count").ConfigureAwait(false);
             int commitCount;
             if (int.TryParse(result, out commitCount))
                 return commitCount;
             return null;
         }
 
-        public string GetCommitCountString(string from, string to)
+        public async Task<string> GetCommitCountStringAsync(string from, string to)
         {
-            int? removed = GetCommitCount(from, to);
-            int? added = GetCommitCount(to, from);
+            int? removed = await GetCommitCountAsync(from, to).ConfigureAwait(false);
+            int? added = await GetCommitCountAsync(to, from).ConfigureAwait(false);
 
             if (removed == null || added == null)
                 return "";
@@ -1052,7 +1057,7 @@ namespace GitCommands
         }
 
         /// <summary>Runs a bash or shell command.</summary>
-        public Process RunBash(string bashCommand = null)
+        public async Task<Process> RunBashAsync(string bashCommand = null)
         {
             if (EnvUtils.RunningOnUnix())
             {
@@ -1065,7 +1070,15 @@ namespace GitCommands
                 };
 
                 string args = "";
-                string cmd = termEmuCmds.FirstOrDefault(termEmuCmd => !string.IsNullOrEmpty(RunCmd("which", termEmuCmd)));
+                string cmd = null;
+                foreach (var termEmuCmd in termEmuCmds)
+                {
+                    if (!string.IsNullOrEmpty(await RunCmdAsync("which", termEmuCmd).ConfigureAwait(false)))
+                    {
+                        cmd = termEmuCmd;
+                        break;
+                    }
+                }
 
                 if (string.IsNullOrEmpty(cmd))
                 {
@@ -1108,16 +1121,16 @@ namespace GitCommands
             }
         }
 
-        public string Init(bool bare, bool shared)
+        public async Task<string> InitAsync(bool bare, bool shared)
         {
-            var result = RunGitCmd(Smart.Format("init{0: --bare|}{1: --shared=all|}", bare, shared));
+            var result = await RunGitCmdAsync(Smart.Format("init{0: --bare|}{1: --shared=all|}", bare, shared)).ConfigureAwait(false);
             WorkingDirGitDir = GitDirectoryResolverInstance.Resolve(_workingDir);
             return result;
         }
 
-        public bool IsMerge(string commit)
+        public async Task<bool> IsMergeAsync(string commit)
         {
-            string[] parents = GetParents(commit);
+            string[] parents = await GetParentsAsync(commit).ConfigureAwait(false);
             return parents.Length > 1;
         }
 
@@ -1142,7 +1155,7 @@ namespace GitCommands
             return message.ToString();
         }
 
-        public GitRevision GetRevision(string commit, bool shortFormat = false)
+        public async Task<GitRevision> GetRevisionAsync(string commit, bool shortFormat = false)
         {
             const string formatString =
                 /* Hash           */ "%H%n" +
@@ -1156,7 +1169,7 @@ namespace GitCommands
                 /* Committer Date */ "%ct%n";
             const string messageFormat = "%e%n%B%nNotes:%n%-N";
             string cmd = "log -n1 --format=format:" + formatString + (shortFormat ? "%e%n%s" : messageFormat) + " " + commit;
-            var revInfo = RunCacheableCmd(AppSettings.GitCommand, cmd, LosslessEncoding);
+            var revInfo = await RunCacheableCmdAsync(AppSettings.GitCommand, cmd, LosslessEncoding).ConfigureAwait(false);
             string[] lines = revInfo.Split('\n');
             var revision = new GitRevision(lines[0])
             {
@@ -1186,58 +1199,56 @@ namespace GitCommands
             return revision;
         }
 
-        public string[] GetParents(string commit)
+        public async Task<string[]> GetParentsAsync(string commit)
         {
-            string output = RunGitCmd("log -n 1 --format=format:%P \"" + commit + "\"");
+            string output = await RunGitCmdAsync("log -n 1 --format=format:%P \"" + commit + "\"").ConfigureAwait(false);
             return output.Split(' ');
         }
 
-        public GitRevision[] GetParentsRevisions(string commit)
+        public async Task<GitRevision[]> GetParentsRevisionsAsync(string commit)
         {
-            string[] parents = GetParents(commit);
+            string[] parents = await GetParentsAsync(commit).ConfigureAwait(false);
             var parentsRevisions = new GitRevision[parents.Length];
             for (int i = 0; i < parents.Length; i++)
-                parentsRevisions[i] = GetRevision(parents[i], true);
+                parentsRevisions[i] = await GetRevisionAsync(parents[i], true).ConfigureAwait(false);
             return parentsRevisions;
         }
 
-        public string ShowSha1(string sha1)
+        public async Task<string> ShowSha1Async(string sha1)
         {
-            return ReEncodeShowString(RunCacheableCmd(AppSettings.GitCommand, "show " + sha1, LosslessEncoding));
+            return ReEncodeShowString(await RunCacheableCmdAsync(AppSettings.GitCommand, "show " + sha1, LosslessEncoding).ConfigureAwait(false));
         }
 
-        public string DeleteTag(string tagName)
+        public async Task<string> DeleteTagAsync(string tagName)
         {
-            return RunGitCmd(GitCommandHelpers.DeleteTagCmd(tagName));
+            return await RunGitCmdAsync(GitCommandHelpers.DeleteTagCmd(tagName)).ConfigureAwait(false);
         }
 
-        public string GetCurrentCheckout()
+        public async Task<string> GetCurrentCheckoutAsync()
         {
-            return RunGitCmd("rev-parse HEAD").TrimEnd();
+            return (await RunGitCmdAsync("rev-parse HEAD").ConfigureAwait(false)).TrimEnd();
         }
 
-        public bool IsExistingCommitHash(string sha1Fragment, out string fullSha1)
+        public async Task<(bool, string fullSha1)> IsExistingCommitHashAsync(string sha1Fragment)
         {
-            string revParseResult = RunGitCmd(string.Format("rev-parse --verify --quiet {0}^{{commit}}", sha1Fragment));
+            string revParseResult = await RunGitCmdAsync(string.Format("rev-parse --verify --quiet {0}^{{commit}}", sha1Fragment)).ConfigureAwait(false);
             revParseResult = revParseResult.Trim();
             if (revParseResult.IsNotNullOrWhitespace() && revParseResult.StartsWith(sha1Fragment))
             {
-                fullSha1 = revParseResult;
-                return true;
+                return (true, revParseResult);
             }
             else
             {
-                fullSha1 = null;
-                return false;
+                return (false, null);
             }
         }
 
-        public KeyValuePair<char, string> GetSuperprojectCurrentCheckout()
+        public async Task<KeyValuePair<char, string>> GetSuperprojectCurrentCheckoutAsync()
         {
             if (SuperprojectModule == null)
                 return new KeyValuePair<char, string>(' ', "");
 
-            var lines = SuperprojectModule.RunGitCmd("submodule status --cached " + _submodulePath).Split('\n');
+            var lines = (await SuperprojectModule.RunGitCmdAsync("submodule status --cached " + _submodulePath).ConfigureAwait(false)).Split('\n');
 
             if (lines.Length == 0)
                 return new KeyValuePair<char, string>(' ', "");
@@ -1250,12 +1261,12 @@ namespace GitCommands
             return new KeyValuePair<char, string>(submodule[0], currentCommitGuid);
         }
 
-        public bool ExistsMergeCommit(string startRev, string endRev)
+        public async Task<bool> ExistsMergeCommitAsync(string startRev, string endRev)
         {
             if (startRev.IsNullOrEmpty() || endRev.IsNullOrEmpty())
                 return false;
 
-            string revisions = RunGitCmd("rev-list --parents --no-walk " + startRev + ".." + endRev);
+            string revisions = await RunGitCmdAsync("rev-list --parents --no-walk " + startRev + ".." + endRev).ConfigureAwait(false);
             string[] revisionsTab = revisions.Split('\n');
             Func<string, bool> ex = (string parents) =>
                 {
@@ -1422,28 +1433,28 @@ namespace GitCommands
             return null;
         }
 
-        public string GetSubmoduleSummary(string submodule)
+        public async Task<string> GetSubmoduleSummaryAsync(string submodule)
         {
             var arguments = string.Format("submodule summary {0}", submodule);
-            return RunGitCmd(arguments);
+            return await RunGitCmdAsync(arguments).ConfigureAwait(false);
         }
 
-        public string ResetSoft(string commit)
+        public async Task<string> ResetSoftAsync(string commit)
         {
-            return ResetSoft(commit, "");
+            return await ResetSoftAsync(commit, "").ConfigureAwait(false);
         }
 
-        public string ResetMixed(string commit)
+        public async Task<string> ResetMixedAsync(string commit)
         {
-            return ResetMixed(commit, "");
+            return await ResetMixedAsync(commit, "").ConfigureAwait(false);
         }
 
-        public string ResetHard(string commit)
+        public async Task<string> ResetHardAsync(string commit)
         {
-            return ResetHard(commit, "");
+            return await ResetHardAsync(commit, "").ConfigureAwait(false);
         }
 
-        public string ResetSoft(string commit, string file)
+        public async Task<string> ResetSoftAsync(string commit, string file)
         {
             var args = "reset --soft";
 
@@ -1453,10 +1464,10 @@ namespace GitCommands
             if (!string.IsNullOrEmpty(file))
                 args += " -- \"" + file + "\"";
 
-            return RunGitCmd(args);
+            return await RunGitCmdAsync(args).ConfigureAwait(false);
         }
 
-        public string ResetMixed(string commit, string file)
+        public async Task<string> ResetMixedAsync(string commit, string file)
         {
             var args = "reset --mixed";
 
@@ -1466,10 +1477,10 @@ namespace GitCommands
             if (!string.IsNullOrEmpty(file))
                 args += " -- \"" + file + "\"";
 
-            return RunGitCmd(args);
+            return await RunGitCmdAsync(args).ConfigureAwait(false);
         }
 
-        public string ResetHard(string commit, string file)
+        public async Task<string> ResetHardAsync(string commit, string file)
         {
             var args = "reset --hard";
 
@@ -1479,13 +1490,13 @@ namespace GitCommands
             if (!string.IsNullOrEmpty(file))
                 args += " -- \"" + file + "\"";
 
-            return RunGitCmd(args);
+            return await RunGitCmdAsync(args).ConfigureAwait(false);
         }
 
-        public string ResetFile(string file)
+        public async Task<string> ResetFileAsync(string file)
         {
             file = file.ToPosixPath();
-            return RunGitCmd("checkout-index --index --force -- \"" + file + "\"");
+            return await RunGitCmdAsync("checkout-index --index --force -- \"" + file + "\"").ConfigureAwait(false);
         }
 
         /// <summary>
@@ -1509,26 +1520,26 @@ namespace GitCommands
             _indexLockManager.UnlockIndex(includeSubmodules);
         }
 
-        public string FormatPatch(string from, string to, string output, int start)
+        public async Task<string> FormatPatchAsync(string from, string to, string output, int start)
         {
             output = output.ToPosixPath();
 
-            var result = RunGitCmd("format-patch -M -C -B --start-number " + start + " \"" + from + "\"..\"" + to +
-                                "\" -o \"" + output + "\"");
+            var result = await RunGitCmdAsync("format-patch -M -C -B --start-number " + start + " \"" + from + "\"..\"" + to +
+                                "\" -o \"" + output + "\"").ConfigureAwait(false);
 
             return result;
         }
 
-        public string FormatPatch(string from, string to, string output)
+        public async Task<string> FormatPatchAsync(string from, string to, string output)
         {
             output = output.ToPosixPath();
 
-            var result = RunGitCmd("format-patch -M -C -B \"" + from + "\"..\"" + to + "\" -o \"" + output + "\"");
+            var result = await RunGitCmdAsync("format-patch -M -C -B \"" + from + "\"..\"" + to + "\" -o \"" + output + "\"").ConfigureAwait(false);
 
             return result;
         }
 
-        public string CheckoutFiles(IEnumerable<string> fileList, string revision, bool force)
+        public async Task<string> CheckoutFilesAsync(IEnumerable<string> fileList, string revision, bool force)
         {
             string files = fileList.Select(s => s.Quote()).Join(" ");
             if (files.IsNullOrWhiteSpace())
@@ -1550,31 +1561,31 @@ namespace GitCommands
                 revision = revision.QuoteNE();
             }
 
-            return RunGitCmd("checkout " + force.AsForce() + revision + " -- " + files);
+            return await RunGitCmdAsync("checkout " + force.AsForce() + revision + " -- " + files).ConfigureAwait(false);
         }
 
-        public string RemoveFiles(IEnumerable<string> fileList, bool force)
+        public async Task<string> RemoveFilesAsync(IEnumerable<string> fileList, bool force)
         {
             string files = fileList.Select(s => s.Quote()).Join(" ");
             if (files.IsNullOrWhiteSpace())
                 return string.Empty;
 
-            return RunGitCmd("rm " + force.AsForce() + " -- " + files);
+            return await RunGitCmdAsync("rm " + force.AsForce() + " -- " + files).ConfigureAwait(false);
         }
 
         /// <summary>Tries to start Pageant for the specified remote repo (using the remote's PuTTY key file).</summary>
         /// <returns>true if the remote has a PuTTY key file; otherwise, false.</returns>
-        public bool StartPageantForRemote(string remote)
+        public async Task<bool> StartPageantForRemoteAsync(string remote)
         {
             var sshKeyFile = GetPuttyKeyFileForRemote(remote);
             if (string.IsNullOrEmpty(sshKeyFile) || !File.Exists(sshKeyFile))
                 return false;
 
-            StartPageantWithKey(sshKeyFile);
+            await StartPageantWithKeyAsync(sshKeyFile).ConfigureAwait(false);
             return true;
         }
 
-        public static void StartPageantWithKey(string sshKeyFile)
+        public static async Task StartPageantWithKeyAsync(string sshKeyFile)
         {
             //ensure pageant is loaded, so we can wait for loading a key in the next command
             //otherwise we'll stuck there waiting until pageant exits
@@ -1584,7 +1595,8 @@ namespace GitCommands
                 Process pageantProcess = RunExternalCmdDetached(AppSettings.Pageant, "", "");
                 pageantProcess.WaitForInputIdle();
             }
-            GitCommandHelpers.RunCmd(AppSettings.Pageant, "\"" + sshKeyFile + "\"");
+
+            await GitCommandHelpers.RunCmdAsync(AppSettings.Pageant, "\"" + sshKeyFile + "\"").ConfigureAwait(false);
         }
 
         public string GetPuttyKeyFileForRemote(string remote)
@@ -1603,7 +1615,7 @@ namespace GitCommands
             return path.Contains(Path.DirectorySeparatorChar) || path.Contains(AppSettings.PosixPathSeparator.ToString());
         }
 
-        public string FetchCmd(string remote, string remoteBranch, string localBranch, bool? fetchTags = false, bool isUnshallow = false, bool prune = false)
+        public async Task<string> FetchCmdAsync(string remote, string remoteBranch, string localBranch, bool? fetchTags = false, bool isUnshallow = false, bool prune = false)
         {
             var progressOption = "";
             if (GitCommandHelpers.VersionInUse.FetchCanAskForProgress)
@@ -1612,10 +1624,10 @@ namespace GitCommands
             if (string.IsNullOrEmpty(remote) && string.IsNullOrEmpty(remoteBranch) && string.IsNullOrEmpty(localBranch))
                 return "fetch " + progressOption;
 
-            return "fetch " + progressOption + GetFetchArgs(remote, remoteBranch, localBranch, fetchTags, isUnshallow, prune);
+            return "fetch " + progressOption + await GetFetchArgsAsync(remote, remoteBranch, localBranch, fetchTags, isUnshallow, prune).ConfigureAwait(false);
         }
 
-        public string PullCmd(string remote, string remoteBranch, bool rebase, bool? fetchTags = false, bool isUnshallow = false, bool prune = false)
+        public async Task<string> PullCmdAsync(string remote, string remoteBranch, bool rebase, bool? fetchTags = false, bool isUnshallow = false, bool prune = false)
         {
             var pullArgs = "";
             if (GitCommandHelpers.VersionInUse.FetchCanAskForProgress)
@@ -1624,10 +1636,10 @@ namespace GitCommands
             if (rebase)
                 pullArgs = "--rebase".Combine(" ", pullArgs);
 
-            return "pull " + pullArgs + GetFetchArgs(remote, remoteBranch, null, fetchTags, isUnshallow, prune && !rebase);
+            return "pull " + pullArgs + await GetFetchArgsAsync(remote, remoteBranch, null, fetchTags, isUnshallow, prune && !rebase).ConfigureAwait(false);
         }
 
-        private string GetFetchArgs(string remote, string remoteBranch, string localBranch, bool? fetchTags, bool isUnshallow, bool prune)
+        private async Task<string> GetFetchArgsAsync(string remote, string remoteBranch, string localBranch, bool? fetchTags, bool isUnshallow, bool prune)
         {
             remote = remote.ToPosixPath();
 
@@ -1643,7 +1655,7 @@ namespace GitCommands
             {
                 if (remoteBranch.StartsWith("+"))
                     remoteBranch = remoteBranch.Remove(0, 1);
-                branchArguments = " +" + FormatBranchName(remoteBranch);
+                branchArguments = " +" + await FormatBranchNameAsync(remoteBranch).ConfigureAwait(false);
 
                 var remoteUrl = GetSetting(string.Format(SettingKeyString.RemoteUrl, remote));
 
@@ -1714,14 +1726,14 @@ namespace GitCommands
         /// <param name="track">For every branch that is up to date or successfully pushed, add upstream (tracking) reference.</param>
         /// <param name="recursiveSubmodules">If '1', check whether all submodule commits used by the revisions to be pushed are available on a remote tracking branch; otherwise, the push will be aborted.</param>
         /// <returns>'git push' command with the specified parameters.</returns>
-        public string PushCmd(string remote, string fromBranch, string toBranch,
+        public async Task<string> PushCmdAsync(string remote, string fromBranch, string toBranch,
             ForcePushOptions force, bool track, int recursiveSubmodules)
         {
             remote = remote.ToPosixPath();
 
             // This method is for pushing to remote branches, so fully qualify the
             // remote branch name with refs/heads/.
-            fromBranch = FormatBranchName(fromBranch);
+            fromBranch = await FormatBranchNameAsync(fromBranch).ConfigureAwait(false);
             toBranch = GitCommandHelpers.GetFullBranchName(toBranch);
 
             if (String.IsNullOrEmpty(fromBranch) && !String.IsNullOrEmpty(toBranch))
@@ -1782,11 +1794,11 @@ namespace GitCommands
             }
         }
 
-        public string AssumeUnchangedFiles(IList<GitItemStatus> files, bool assumeUnchanged, out bool wereErrors)
+        public async Task<(string output, bool wereErrors)> AssumeUnchangedFilesAsync(IList<GitItemStatus> files, bool assumeUnchanged)
         {
             var output = "";
             string error = "";
-            wereErrors = false;
+            bool wereErrors = false;
             var startInfo = CreateGitStartInfo("update-index --" + (assumeUnchanged ? "" : "no-") + "assume-unchanged --stdin");
             var processReader = new Lazy<SynchronizedProcessReader>(() => new SynchronizedProcessReader(Process.Start(startInfo)));
 
@@ -1797,15 +1809,15 @@ namespace GitCommands
             if (processReader.IsValueCreated)
             {
                 processReader.Value.Process.StandardInput.Close();
-                processReader.Value.WaitForExit();
+                await processReader.Value.WaitForExitAsync().ConfigureAwait(false);
                 output = processReader.Value.OutputString(SystemEncoding);
                 error = processReader.Value.ErrorString(SystemEncoding);
             }
 
-            return output.Combine(Environment.NewLine, error);
+            return (output.Combine(Environment.NewLine, error), wereErrors);
         }
 
-        public string SkipWorktreeFiles(IList<GitItemStatus> files, bool skipWorktree)
+        public async Task<string> SkipWorktreeFilesAsync(IList<GitItemStatus> files, bool skipWorktree)
         {
             var output = "";
             string error = "";
@@ -1819,7 +1831,7 @@ namespace GitCommands
             if (processReader.IsValueCreated)
             {
                 processReader.Value.Process.StandardInput.Close();
-                processReader.Value.WaitForExit();
+                await processReader.Value.WaitForExitAsync().ConfigureAwait(false);
                 output = processReader.Value.OutputString(SystemEncoding);
                 error = processReader.Value.ErrorString(SystemEncoding);
             }
@@ -1827,11 +1839,11 @@ namespace GitCommands
             return output.Combine(Environment.NewLine, error);
         }
 
-        public string StageFiles(IList<GitItemStatus> files, out bool wereErrors)
+        public async Task<(string output, bool wereErrors)> StageFilesAsync(IList<GitItemStatus> files)
         {
             var output = "";
             string error = "";
-            wereErrors = false;
+            bool wereErrors = false;
             var startInfo = CreateGitStartInfo("update-index --add --stdin");
             var processReader = new Lazy<SynchronizedProcessReader>(() => new SynchronizedProcessReader(Process.Start(startInfo)));
 
@@ -1842,7 +1854,7 @@ namespace GitCommands
             if (processReader.IsValueCreated)
             {
                 processReader.Value.Process.StandardInput.Close();
-                processReader.Value.WaitForExit();
+                await processReader.Value.WaitForExitAsync().ConfigureAwait(false);
                 wereErrors = processReader.Value.Process.ExitCode != 0;
                 output = processReader.Value.OutputString(SystemEncoding);
                 error = processReader.Value.ErrorString(SystemEncoding);
@@ -1857,16 +1869,16 @@ namespace GitCommands
             if (processReader.IsValueCreated)
             {
                 processReader.Value.Process.StandardInput.Close();
-                processReader.Value.WaitForExit();
+                await processReader.Value.WaitForExitAsync().ConfigureAwait(false);
                 output = output.Combine(Environment.NewLine, processReader.Value.OutputString(SystemEncoding));
                 error = error.Combine(Environment.NewLine, processReader.Value.ErrorString(SystemEncoding));
                 wereErrors = wereErrors || processReader.Value.Process.ExitCode != 0;
             }
 
-            return output.Combine(Environment.NewLine, error);
+            return (output.Combine(Environment.NewLine, error), wereErrors);
         }
 
-        public string UnstageFiles(IList<GitItemStatus> files)
+        public async Task<string> UnstageFilesAsync(IList<GitItemStatus> files)
         {
             var output = "";
             string error = "";
@@ -1874,12 +1886,12 @@ namespace GitCommands
             var processReader = new Lazy<SynchronizedProcessReader>(() => new SynchronizedProcessReader(Process.Start(startInfo)));
             foreach (var file in files.Where(file => !file.IsNew))
             {
-                processReader.Value.Process.StandardInput.WriteLine("0 0000000000000000000000000000000000000000\t\"" + file.Name.ToPosixPath() + "\"");
+                await processReader.Value.Process.StandardInput.WriteLineAsync("0 0000000000000000000000000000000000000000\t\"" + file.Name.ToPosixPath() + "\"").ConfigureAwait(false);
             }
             if (processReader.IsValueCreated)
             {
                 processReader.Value.Process.StandardInput.Close();
-                processReader.Value.WaitForExit();
+                await processReader.Value.WaitForExitAsync().ConfigureAwait(false);
                 output = processReader.Value.OutputString(SystemEncoding);
                 error = processReader.Value.ErrorString(SystemEncoding);
             }
@@ -1893,7 +1905,7 @@ namespace GitCommands
             if (processReader.IsValueCreated)
             {
                 processReader.Value.Process.StandardInput.Close();
-                processReader.Value.WaitForExit();
+                await processReader.Value.WaitForExitAsync().ConfigureAwait(false);
                 output = output.Combine(Environment.NewLine, processReader.Value.OutputString(SystemEncoding));
                 error = error.Combine(Environment.NewLine, processReader.Value.ErrorString(SystemEncoding));
             }
@@ -1926,9 +1938,9 @@ namespace GitCommands
                    Directory.Exists(GetRebaseDir());
         }
 
-        public bool InTheMiddleOfAction()
+        public async Task<bool> InTheMiddleOfActionAsync()
         {
-            return InTheMiddleOfConflictedMerge() || InTheMiddleOfRebase();
+            return (await InTheMiddleOfConflictedMergeAsync().ConfigureAwait(false)) || InTheMiddleOfRebase();
         }
 
         public string GetNextRebasePatch()
@@ -1962,7 +1974,7 @@ namespace GitCommands
             return File.Exists(GetRebaseDir() + "git-rebase-todo");
         }
 
-        public IList<PatchFile> GetInteractiveRebasePatchFiles()
+        public async Task<IList<PatchFile>> GetInteractiveRebasePatchFilesAsync()
         {
             string todoFile = GetRebaseDir() + "git-rebase-todo";
             string[] todoCommits = File.Exists(todoFile) ? File.ReadAllText(todoFile).Trim().Split(new char[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries) : null;
@@ -1982,8 +1994,7 @@ namespace GitCommands
 
                     if (parts.Length >= 3)
                     {
-                        string error = string.Empty;
-                        CommitData data = _commitDataManager.GetCommitData(parts[1], ref error);
+                        (CommitData data, string error) = await _commitDataManager.GetCommitDataAsync(parts[1]).ConfigureAwait(false);
 
                         PatchFile nextCommitPatch = new PatchFile();
                         nextCommitPatch.Author = string.IsNullOrEmpty(error) ? data.Author : error;
@@ -2128,9 +2139,9 @@ namespace GitCommands
         /// Removes the registered remote by running <c>git remote rm</c> command.
         /// </summary>
         /// <param name="remoteName">The remote name.</param>
-        public string RemoveRemote(string remoteName)
+        public async Task<string> RemoveRemoteAsync(string remoteName)
         {
-            return RunGitCmd("remote rm \"" + remoteName + "\"");
+            return await RunGitCmdAsync("remote rm \"" + remoteName + "\"").ConfigureAwait(false);
         }
 
         /// <summary>
@@ -2138,17 +2149,17 @@ namespace GitCommands
         /// </summary>
         /// <param name="remoteName">The current remote name.</param>
         /// <param name="newName">The new remote name.</param>
-        public string RenameRemote(string remoteName, string newName)
+        public async Task<string> RenameRemoteAsync(string remoteName, string newName)
         {
-            return RunGitCmd("remote rename \"" + remoteName + "\" \"" + newName + "\"");
+            return await RunGitCmdAsync("remote rename \"" + remoteName + "\" \"" + newName + "\"").ConfigureAwait(false);
         }
 
-        public string RenameBranch(string name, string newName)
+        public async Task<string> RenameBranchAsync(string name, string newName)
         {
-            return RunGitCmd("branch -m \"" + name + "\" \"" + newName + "\"");
+            return await RunGitCmdAsync("branch -m \"" + name + "\" \"" + newName + "\"").ConfigureAwait(false);
         }
 
-        public string AddRemote(string name, string path)
+        public async Task<string> AddRemoteAsync(string name, string path)
         {
             var location = path.ToPosixPath();
 
@@ -2157,17 +2168,17 @@ namespace GitCommands
 
             return
                 string.IsNullOrEmpty(location)
-                    ? RunGitCmd(string.Format("remote add \"{0}\" \"\"", name))
-                    : RunGitCmd(string.Format("remote add \"{0}\" \"{1}\"", name, location));
+                    ? await RunGitCmdAsync(string.Format("remote add \"{0}\" \"\"", name)).ConfigureAwait(false)
+                    : await RunGitCmdAsync(string.Format("remote add \"{0}\" \"{1}\"", name, location)).ConfigureAwait(false);
         }
 
         /// <summary>
         /// Retrieves registered remotes by running <c>git remote show</c> command.
         /// </summary>
         /// <returns>Registered remotes.</returns>
-        public string[] GetRemotes()
+        public async Task<string[]> GetRemotesAsync()
         {
-            return GetRemotes(true);
+            return await GetRemotesAsync(true).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -2175,9 +2186,9 @@ namespace GitCommands
         /// </summary>
         /// <param name="allowEmpty"></param>
         /// <returns>Registered remotes.</returns>
-        public string[] GetRemotes(bool allowEmpty)
+        public async Task<string[]> GetRemotesAsync(bool allowEmpty)
         {
-            string remotes = RunGitCmd("remote show");
+            string remotes = await RunGitCmdAsync("remote show").ConfigureAwait(false);
             return allowEmpty ? remotes.Split('\n') : remotes.Split(new char[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
         }
 
@@ -2211,9 +2222,9 @@ namespace GitCommands
             LocalConfigFile.SetPathValue(setting, value);
         }
 
-        public IList<GitStash> GetStashes()
+        public async Task<IList<GitStash>> GetStashesAsync()
         {
-            var list = RunGitCmd("stash list").Split('\n');
+            var list = (await RunGitCmdAsync("stash list").ConfigureAwait(false)).Split('\n');
 
             var stashes = new List<GitStash>();
             for (int i = 0; i < list.Length; i++)
@@ -2228,7 +2239,7 @@ namespace GitCommands
             return stashes;
         }
 
-        public Patch GetSingleDiff(string firstRevision, string secondRevision, string fileName, string oldFileName, string extraDiffArguments, Encoding encoding, bool cacheResult, bool isTracked = true)
+        public async Task<Patch> GetSingleDiffAsync(string firstRevision, string secondRevision, string fileName, string oldFileName, string extraDiffArguments, Encoding encoding, bool cacheResult, bool isTracked = true)
         {
             if (!string.IsNullOrEmpty(fileName))
             {
@@ -2255,9 +2266,9 @@ namespace GitCommands
                 !firstRevision.IsNullOrEmpty();
             string patch;
             if (cacheResult)
-                patch = RunCacheableCmd(AppSettings.GitCommand, arguments, LosslessEncoding);
+                patch = await RunCacheableCmdAsync(AppSettings.GitCommand, arguments, LosslessEncoding).ConfigureAwait(false);
             else
-                patch = RunCmd(AppSettings.GitCommand, arguments, LosslessEncoding);
+                patch = await RunCmdAsync(AppSettings.GitCommand, arguments, LosslessEncoding).ConfigureAwait(false);
             patchManager.LoadPatch(patch, false, encoding);
 
             return GetPatch(patchManager, fileName, oldFileName);
@@ -2273,42 +2284,42 @@ namespace GitCommands
             return patchManager.Patches.Count > 0 ? patchManager.Patches[patchManager.Patches.Count - 1] : null;
         }
 
-        public string GetStatusText(bool untracked)
+        public async Task<string> GetStatusTextAsync(bool untracked)
         {
             string cmd = "status -s";
             if (untracked)
                 cmd = cmd + " -u";
-            return RunGitCmd(cmd);
+            return await RunGitCmdAsync(cmd).ConfigureAwait(false);
         }
 
-        public string GetDiffFilesText(string firstRevision, string secondRevision)
+        public async Task<string> GetDiffFilesTextAsync(string firstRevision, string secondRevision)
         {
-            return GetDiffFilesText(firstRevision, secondRevision, false);
+            return await GetDiffFilesTextAsync(firstRevision, secondRevision, false).ConfigureAwait(false);
         }
 
-        public string GetDiffFilesText(string firstRevision, string secondRevision, bool noCache)
+        public async Task<string> GetDiffFilesTextAsync(string firstRevision, string secondRevision, bool noCache)
         {
             string cmd = DiffCommandWithStandardArgs + "-M -C --name-status " + _revisionDiffProvider.Get(firstRevision, secondRevision);
-            return noCache ? RunGitCmd(cmd) : this.RunCacheableCmd(AppSettings.GitCommand, cmd, SystemEncoding);
+            return noCache ? await RunGitCmdAsync(cmd).ConfigureAwait(false) : await this.RunCacheableCmdAsync(AppSettings.GitCommand, cmd, SystemEncoding).ConfigureAwait(false);
         }
 
-        public List<GitItemStatus> GetDiffFilesWithSubmodulesStatus(string firstRevision, string secondRevision)
+        public async Task<List<GitItemStatus>> GetDiffFilesWithSubmodulesStatusAsync(string firstRevision, string secondRevision)
         {
-            var status = GetDiffFiles(firstRevision, secondRevision);
+            var status = await GetDiffFilesAsync(firstRevision, secondRevision).ConfigureAwait(false);
             GetSubmoduleStatus(status, firstRevision, secondRevision);
             return status;
         }
 
-        public List<GitItemStatus> GetDiffFiles(string firstRevision, string secondRevision, bool noCache = false)
+        public async Task<List<GitItemStatus>> GetDiffFilesAsync(string firstRevision, string secondRevision, bool noCache = false)
         {
             noCache = noCache || firstRevision.IsArtificial() || secondRevision.IsArtificial();
             string cmd = DiffCommandWithStandardArgs + "-M -C -z --name-status " + _revisionDiffProvider.Get(firstRevision, secondRevision);
-            string result = noCache ? RunGitCmd(cmd) : this.RunCacheableCmd(AppSettings.GitCommand, cmd, SystemEncoding);
+            string result = noCache ? await RunGitCmdAsync(cmd).ConfigureAwait(false) : await this.RunCacheableCmdAsync(AppSettings.GitCommand, cmd, SystemEncoding).ConfigureAwait(false);
             var resultCollection = GitCommandHelpers.GetAllChangedFilesFromString(this, result, true);
             if (firstRevision == GitRevision.UnstagedGuid || secondRevision == GitRevision.UnstagedGuid)
             {
                 //For unstaged the untracked must be added too
-                var files = GetUnstagedFilesWithSubmodulesStatus().Where(item => item.IsNew);
+                var files = (await GetUnstagedFilesWithSubmodulesStatusAsync().ConfigureAwait(false)).Where(item => item.IsNew);
                 if (firstRevision == GitRevision.UnstagedGuid)
                 {
                     //The file is seen as "deleted" in 'to' revision
@@ -2327,24 +2338,24 @@ namespace GitCommands
             return resultCollection;
         }
 
-        public IList<GitItemStatus> GetStashDiffFiles(string stashName)
+        public async Task<IList<GitItemStatus>> GetStashDiffFilesAsync(string stashName)
         {
-            var resultCollection = GetDiffFiles(stashName + "^", stashName, true);
+            var resultCollection = await GetDiffFilesAsync(stashName + "^", stashName, true).ConfigureAwait(false);
 
             // shows untracked files
-            string untrackedTreeHash = RunGitCmd("log " + stashName + "^3 --pretty=format:\"%T\" --max-count=1");
+            string untrackedTreeHash = await RunGitCmdAsync("log " + stashName + "^3 --pretty=format:\"%T\" --max-count=1").ConfigureAwait(false);
             if (GitRevision.Sha1HashRegex.IsMatch(untrackedTreeHash))
             {
-                var files = GetTreeFiles(untrackedTreeHash, true);
+                var files = await GetTreeFilesAsync(untrackedTreeHash, true).ConfigureAwait(false);
                 resultCollection.AddRange(files);
             }
 
             return resultCollection;
         }
 
-        public IList<GitItemStatus> GetTreeFiles(string treeGuid, bool full)
+        public async Task<IList<GitItemStatus>> GetTreeFilesAsync(string treeGuid, bool full)
         {
-            var tree = GetTree(treeGuid, full);
+            var tree = await GetTreeAsync(treeGuid, full).ConfigureAwait(false);
 
             var list = tree
                 .Select(file => new GitItemStatus
@@ -2369,16 +2380,16 @@ namespace GitCommands
             return list;
         }
 
-        public IList<GitItemStatus> GetAllChangedFiles(bool excludeIgnoredFiles = true,
+        public async Task<IList<GitItemStatus>> GetAllChangedFilesAsync(bool excludeIgnoredFiles = true,
             bool excludeAssumeUnchangedFiles = true, bool excludeSkipWorktreeFiles = true,
             UntrackedFilesMode untrackedFiles = UntrackedFilesMode.Default)
         {
-            var status = RunGitCmd(GitCommandHelpers.GetAllChangedFilesCmd(excludeIgnoredFiles, untrackedFiles));
+            var status = await RunGitCmdAsync(GitCommandHelpers.GetAllChangedFilesCmd(excludeIgnoredFiles, untrackedFiles)).ConfigureAwait(false);
             List<GitItemStatus> result = GitCommandHelpers.GetAllChangedFilesFromString(this, status);
 
             if (!excludeAssumeUnchangedFiles || !excludeSkipWorktreeFiles)
             {
-                string lsOutput = RunGitCmd("ls-files -v");
+                string lsOutput = await RunGitCmdAsync("ls-files -v").ConfigureAwait(false);
                 if (!excludeAssumeUnchangedFiles)
                     result.AddRange(GitCommandHelpers.GetAssumeUnchangedFilesFromString(lsOutput));
                 if (!excludeSkipWorktreeFiles)
@@ -2388,11 +2399,11 @@ namespace GitCommands
             return result;
         }
 
-        public IList<GitItemStatus> GetAllChangedFilesWithSubmodulesStatus(bool excludeIgnoredFiles = true,
+        public async Task<IList<GitItemStatus>> GetAllChangedFilesWithSubmodulesStatusAsync(bool excludeIgnoredFiles = true,
             bool excludeAssumeUnchangedFiles = true, bool excludeSkipWorktreeFiles = true,
             UntrackedFilesMode untrackedFiles = UntrackedFilesMode.Default)
         {
-            var status = GetAllChangedFiles(excludeIgnoredFiles, excludeAssumeUnchangedFiles, excludeSkipWorktreeFiles, untrackedFiles);
+            var status = await GetAllChangedFilesAsync(excludeIgnoredFiles, excludeAssumeUnchangedFiles, excludeSkipWorktreeFiles, untrackedFiles).ConfigureAwait(false);
             GetCurrentSubmoduleStatus(status);
             return status;
         }
@@ -2407,11 +2418,11 @@ namespace GitCommands
                     {
                         await TaskScheduler.Default.SwitchTo(alwaysYield: true);
 
-                        var submoduleStatus = GitCommandHelpers.GetCurrentSubmoduleChanges(this, localItem.Name, localItem.OldName, localItem.IsStaged);
+                        var submoduleStatus = await GitCommandHelpers.GetCurrentSubmoduleChangesAsync(this, localItem.Name, localItem.OldName, localItem.IsStaged).ConfigureAwait(false);
                         if (submoduleStatus != null && submoduleStatus.Commit != submoduleStatus.OldCommit)
                         {
                             var submodule = submoduleStatus.GetSubmodule(this);
-                            submoduleStatus.CheckSubmoduleStatus(submodule);
+                            await submoduleStatus.CheckSubmoduleStatusAsync(submodule).ConfigureAwait(false);
                         }
                         return submoduleStatus;
                     });
@@ -2428,13 +2439,13 @@ namespace GitCommands
                     {
                         await TaskScheduler.Default.SwitchTo(alwaysYield: true);
 
-                        Patch patch = GetSingleDiff(firstRevision, secondRevision, item.Name, item.OldName, "", SystemEncoding, true);
+                        Patch patch = await GetSingleDiffAsync(firstRevision, secondRevision, item.Name, item.OldName, "", SystemEncoding, true).ConfigureAwait(false);
                         string text = patch != null ? patch.Text : "";
-                        var submoduleStatus = GitCommandHelpers.GetSubmoduleStatus(text, this, item.Name);
+                        var submoduleStatus = await GitCommandHelpers.GetSubmoduleStatusAsync(text, this, item.Name).ConfigureAwait(false);
                         if (submoduleStatus.Commit != submoduleStatus.OldCommit)
                         {
                             var submodule = submoduleStatus.GetSubmodule(this);
-                            submoduleStatus.CheckSubmoduleStatus(submodule);
+                            await submoduleStatus.CheckSubmoduleStatusAsync(submodule).ConfigureAwait(false);
                         }
                         return submoduleStatus;
                     });
@@ -2442,15 +2453,15 @@ namespace GitCommands
             });
         }
 
-        public IList<GitItemStatus> GetStagedFiles()
+        public async Task<IList<GitItemStatus>> GetStagedFilesAsync()
         {
-            string status = RunGitCmd(DiffCommandWithStandardArgs + "-M -C -z --cached --name-status", SystemEncoding);
+            string status = await RunGitCmdAsync(DiffCommandWithStandardArgs + "-M -C -z --cached --name-status", SystemEncoding).ConfigureAwait(false);
 
             if (status.Length < 50 && status.Contains("fatal: No HEAD commit to compare"))
             {
                 //This command is a little more expensive because it will return both staged and unstaged files
                 string command = GitCommandHelpers.GetAllChangedFilesCmd(true, UntrackedFilesMode.No);
-                status = RunGitCmd(command, SystemEncoding);
+                status = await RunGitCmdAsync(command, SystemEncoding).ConfigureAwait(false);
                 IList<GitItemStatus> stagedFiles = GitCommandHelpers.GetAllChangedFilesFromString(this, status, false);
                 return stagedFiles.Where(f => f.IsStaged).ToList();
             }
@@ -2458,38 +2469,38 @@ namespace GitCommands
             return GitCommandHelpers.GetAllChangedFilesFromString(this, status, true);
         }
 
-        public IList<GitItemStatus> GetStagedFilesWithSubmodulesStatus()
+        public async Task<IList<GitItemStatus>> GetStagedFilesWithSubmodulesStatusAsync()
         {
-            var status = GetStagedFiles();
+            var status = await GetStagedFilesAsync().ConfigureAwait(false);
             GetCurrentSubmoduleStatus(status);
             return status;
         }
 
-        public IList<GitItemStatus> GetUnstagedFiles()
+        public async Task<IList<GitItemStatus>> GetUnstagedFilesAsync()
         {
-            return GetAllChangedFiles().Where(x => !x.IsStaged).ToArray();
+            return (await GetAllChangedFilesAsync().ConfigureAwait(false)).Where(x => !x.IsStaged).ToArray();
         }
 
-        public IList<GitItemStatus> GetUnstagedFilesWithSubmodulesStatus()
+        public async Task<IList<GitItemStatus>> GetUnstagedFilesWithSubmodulesStatusAsync()
         {
-            return GetAllChangedFilesWithSubmodulesStatus().Where(x => !x.IsStaged).ToArray();
+            return (await GetAllChangedFilesWithSubmodulesStatusAsync().ConfigureAwait(false)).Where(x => !x.IsStaged).ToArray();
         }
 
-        public IList<GitItemStatus> GitStatus(UntrackedFilesMode untrackedFilesMode, IgnoreSubmodulesMode ignoreSubmodulesMode = 0)
+        public async Task<IList<GitItemStatus>> GitStatusAsync(UntrackedFilesMode untrackedFilesMode, IgnoreSubmodulesMode ignoreSubmodulesMode = 0)
         {
             string command = GitCommandHelpers.GetAllChangedFilesCmd(true, untrackedFilesMode, ignoreSubmodulesMode);
-            string status = RunGitCmd(command);
+            string status = await RunGitCmdAsync(command).ConfigureAwait(false);
             return GitCommandHelpers.GetAllChangedFilesFromString(this, status);
         }
 
         /// <summary>Indicates whether there are any changes to the repository,
         ///  including any untracked files or directories; excluding submodules.</summary>
-        public bool IsDirtyDir()
+        public async Task<bool> IsDirtyDirAsync()
         {
-            return GitStatus(UntrackedFilesMode.All, IgnoreSubmodulesMode.Default).Count > 0;
+            return (await GitStatusAsync(UntrackedFilesMode.All, IgnoreSubmodulesMode.Default).ConfigureAwait(false)).Count > 0;
         }
 
-        public Patch GetCurrentChanges(string fileName, string oldFileName, bool staged, string extraDiffArguments, Encoding encoding)
+        public async Task<Patch> GetCurrentChangesAsync(string fileName, string oldFileName, bool staged, string extraDiffArguments, Encoding encoding)
         {
             fileName = fileName.ToPosixPath();
             if (!string.IsNullOrEmpty(oldFileName))
@@ -2502,33 +2513,33 @@ namespace GitCommands
             if (staged)
                 args = string.Concat(DiffCommandWithStandardArgs, "-M -C --cached ", extraDiffArguments, " -- ", fileName.Quote(), " ", oldFileName.Quote());
 
-            String result = RunGitCmd(args, LosslessEncoding);
+            String result = await RunGitCmdAsync(args, LosslessEncoding).ConfigureAwait(false);
             var patchManager = new PatchManager();
             patchManager.LoadPatch(result, false, encoding);
 
             return GetPatch(patchManager, fileName, oldFileName);
         }
 
-        private string GetFileContents(string path)
+        private async Task<string> GetFileContentsAsync(string path)
         {
-            var contents = RunGitCmdResult(string.Format("show HEAD:\"{0}\"", path.ToPosixPath()));
+            var contents = await RunGitCmdResultAsync(string.Format("show HEAD:\"{0}\"", path.ToPosixPath())).ConfigureAwait(false);
             if (contents.ExitCode == 0)
                 return contents.StdOutput;
 
             return null;
         }
 
-        public string GetFileContents(GitItemStatus file)
+        public async Task<string> GetFileContentsAsync(GitItemStatus file)
         {
             var contents = new StringBuilder();
 
-            string currentContents = GetFileContents(file.Name);
+            string currentContents = await GetFileContentsAsync(file.Name).ConfigureAwait(false);
             if (currentContents != null)
                 contents.Append(currentContents);
 
             if (file.OldName != null)
             {
-                string oldContents = GetFileContents(file.OldName);
+                string oldContents = await GetFileContentsAsync(file.OldName).ConfigureAwait(false);
                 if (oldContents != null)
                     contents.Append(oldContents);
             }
@@ -2536,24 +2547,24 @@ namespace GitCommands
             return contents.Length > 0 ? contents.ToString() : null;
         }
 
-        public string StageFile(string file)
+        public async Task<string> StageFileAsync(string file)
         {
-            return RunGitCmd("update-index --add" + " \"" + file.ToPosixPath() + "\"");
+            return await RunGitCmdAsync("update-index --add" + " \"" + file.ToPosixPath() + "\"").ConfigureAwait(false);
         }
 
-        public string StageFileToRemove(string file)
+        public async Task<string> StageFileToRemoveAsync(string file)
         {
-            return RunGitCmd("update-index --remove" + " \"" + file.ToPosixPath() + "\"");
+            return await RunGitCmdAsync("update-index --remove" + " \"" + file.ToPosixPath() + "\"").ConfigureAwait(false);
         }
 
-        public string UnstageFile(string file)
+        public async Task<string> UnstageFileAsync(string file)
         {
-            return RunGitCmd("rm --cached \"" + file.ToPosixPath() + "\"");
+            return await RunGitCmdAsync("rm --cached \"" + file.ToPosixPath() + "\"").ConfigureAwait(false);
         }
 
-        public string UnstageFileToRemove(string file)
+        public async Task<string> UnstageFileToRemoveAsync(string file)
         {
-            return RunGitCmd("reset HEAD -- \"" + file.ToPosixPath() + "\"");
+            return await RunGitCmdAsync("reset HEAD -- \"" + file.ToPosixPath() + "\"").ConfigureAwait(false);
         }
 
         /// <summary>Dirty but fast. This sometimes fails.</summary>
@@ -2584,13 +2595,13 @@ namespace GitCommands
         }
 
         /// <summary>Gets the current branch; or "(no branch)" if HEAD is detached.</summary>
-        public string GetSelectedBranch(string repositoryPath)
+        public async Task<string> GetSelectedBranchAsync(string repositoryPath)
         {
             string head = GetSelectedBranchFast(repositoryPath);
 
             if (string.IsNullOrEmpty(head))
             {
-                var result = RunGitCmdResult("symbolic-ref HEAD");
+                var result = await RunGitCmdResultAsync("symbolic-ref HEAD").ConfigureAwait(false);
                 if (result.ExitCode == 1)
                     return DetachedBranch;
                 return result.StdOutput;
@@ -2600,15 +2611,15 @@ namespace GitCommands
         }
 
         /// <summary>Gets the current branch; or "(no branch)" if HEAD is detached.</summary>
-        public string GetSelectedBranch()
+        public async Task<string> GetSelectedBranchAsync()
         {
-            return GetSelectedBranch(_workingDir);
+            return await GetSelectedBranchAsync(_workingDir).ConfigureAwait(false);
         }
 
         /// <summary>Indicates whether HEAD is not pointing to a branch.</summary>
-        public bool IsDetachedHead()
+        public async Task<bool> IsDetachedHeadAsync()
         {
-            return IsDetachedHead(GetSelectedBranch());
+            return IsDetachedHead(await GetSelectedBranchAsync().ConfigureAwait(false));
         }
 
         public static bool IsDetachedHead(string branch)
@@ -2617,9 +2628,9 @@ namespace GitCommands
         }
 
         /// <summary>Gets the remote of the current branch; or "origin" if no remote is configured.</summary>
-        public string GetCurrentRemote()
+        public async Task<string> GetCurrentRemoteAsync()
         {
-            string remote = GetSetting(string.Format(SettingKeyString.BranchRemote, GetSelectedBranch()));
+            string remote = GetSetting(string.Format(SettingKeyString.BranchRemote, await GetSelectedBranchAsync().ConfigureAwait(false)));
             return remote;
         }
 
@@ -2633,12 +2644,12 @@ namespace GitCommands
             return remote + "/" + (merge.StartsWith("refs/heads/") ? merge.Substring(11) : merge);
         }
 
-        public IEnumerable<IGitRef> GetRemoteBranches()
+        public async Task<IEnumerable<IGitRef>> GetRemoteBranchesAsync()
         {
-            return GetRefs().Where(r => r.IsRemote);
+            return (await GetRefsAsync().ConfigureAwait(false)).Where(r => r.IsRemote);
         }
 
-        public RemoteActionResult<IList<IGitRef>> GetRemoteServerRefs(string remote, bool tags, bool branches)
+        public async Task<RemoteActionResult<IList<IGitRef>>> GetRemoteServerRefsAsync(string remote, bool tags, bool branches)
         {
             var result = new RemoteActionResult<IList<IGitRef>>()
             {
@@ -2649,7 +2660,7 @@ namespace GitCommands
 
             remote = remote.ToPosixPath();
 
-            result.CmdResult = GetTreeFromRemoteRefs(remote, tags, branches);
+            result.CmdResult = await GetTreeFromRemoteRefsAsync(remote, tags, branches).ConfigureAwait(false);
 
             var tree = result.CmdResult.StdOutput;
             // If the authentication failed because of a missing key, ask the user to supply one.
@@ -2663,32 +2674,32 @@ namespace GitCommands
             }
             else if (result.CmdResult.ExitedSuccessfully)
             {
-                result.Result = GetTreeRefs(tree);
+                result.Result = await GetTreeRefsAsync(tree).ConfigureAwait(false);
             }
 
             return result;
         }
 
-        private CmdResult GetTreeFromRemoteRefsEx(string remote, bool tags, bool branches)
+        private async Task<CmdResult> GetTreeFromRemoteRefsExAsync(string remote, bool tags, bool branches)
         {
             if (tags && branches)
-                return RunGitCmdResult("ls-remote --heads --tags \"" + remote + "\"");
+                return await RunGitCmdResultAsync("ls-remote --heads --tags \"" + remote + "\"").ConfigureAwait(false);
             if (tags)
-                return RunGitCmdResult("ls-remote --tags \"" + remote + "\"");
+                return await RunGitCmdResultAsync("ls-remote --tags \"" + remote + "\"").ConfigureAwait(false);
             if (branches)
-                return RunGitCmdResult("ls-remote --heads \"" + remote + "\"");
+                return await RunGitCmdResultAsync("ls-remote --heads \"" + remote + "\"").ConfigureAwait(false);
             return new CmdResult();
         }
 
-        private CmdResult GetTreeFromRemoteRefs(string remote, bool tags, bool branches)
+        private async Task<CmdResult> GetTreeFromRemoteRefsAsync(string remote, bool tags, bool branches)
         {
-            return GetTreeFromRemoteRefsEx(remote, tags, branches);
+            return await GetTreeFromRemoteRefsExAsync(remote, tags, branches).ConfigureAwait(false);
         }
 
-        public IList<IGitRef> GetRefs(bool tags = true, bool branches = true)
+        public async Task<IList<IGitRef>> GetRefsAsync(bool tags = true, bool branches = true)
         {
-            var tree = GetTree(tags, branches);
-            return GetTreeRefs(tree);
+            var tree = await GetTreeAsync(tags, branches).ConfigureAwait(false);
+            return await GetTreeRefsAsync(tree).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -2696,9 +2707,9 @@ namespace GitCommands
         /// </summary>
         /// <param name="option">Ordery by date is slower.</param>
         /// <returns></returns>
-        public IList<IGitRef> GetTagRefs(GetTagRefsSortOrder option)
+        public async Task<IList<IGitRef>> GetTagRefsAsync(GetTagRefsSortOrder option)
         {
-            var list = GetRefs(true, false);
+            var list = await GetRefsAsync(true, false).ConfigureAwait(false);
 
             List<IGitRef> sortedList;
             if (option == GetTagRefsSortOrder.ByCommitDateAscending)
@@ -2741,19 +2752,19 @@ namespace GitCommands
             ByCommitDateDescending
         }
 
-        public ICollection<string> GetMergedBranches(bool includeRemote = false)
+        public async Task<ICollection<string>> GetMergedBranchesAsync(bool includeRemote = false)
         {
-            return RunGitCmd(GitCommandHelpers.MergedBranches(includeRemote)).Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            return (await RunGitCmdAsync(GitCommandHelpers.MergedBranches(includeRemote)).ConfigureAwait(false)).Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
         }
 
-        public ICollection<string> GetMergedRemoteBranches()
+        public async Task<ICollection<string>> GetMergedRemoteBranchesAsync()
         {
             string remoteBranchPrefixForMergedBranches = "remotes/";
             string refsPrefix = "refs/";
 
-            string[] mergedBranches = RunGitCmd(GitCommandHelpers.MergedBranches(includeRemote: true)).Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] mergedBranches = (await RunGitCmdAsync(GitCommandHelpers.MergedBranches(includeRemote: true)).ConfigureAwait(false)).Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
-            var remotes = GetRemotes(allowEmpty: false);
+            var remotes = await GetRemotesAsync(allowEmpty: false).ConfigureAwait(false);
 
             return mergedBranches
                 .Select(b => b.Trim())
@@ -2762,26 +2773,27 @@ namespace GitCommands
                 .Where(b => !string.IsNullOrEmpty(GitCommandHelpers.GetRemoteName(b, remotes))).ToList();
         }
 
-        private string GetTree(bool tags, bool branches)
+        private async Task<string> GetTreeAsync(bool tags, bool branches)
         {
             if (tags && branches)
-                return RunGitCmd("show-ref --dereference", SystemEncoding);
+                return await RunGitCmdAsync("show-ref --dereference", SystemEncoding).ConfigureAwait(false);
 
             if (tags)
-                return RunGitCmd("show-ref --tags", SystemEncoding);
+                return await RunGitCmdAsync("show-ref --tags", SystemEncoding).ConfigureAwait(false);
 
             if (branches)
-                return RunGitCmd(@"for-each-ref --sort=-committerdate refs/heads/ --format=""%(objectname) %(refname)""", SystemEncoding);
+                return await RunGitCmdAsync(@"for-each-ref --sort=-committerdate refs/heads/ --format=""%(objectname) %(refname)""", SystemEncoding).ConfigureAwait(false);
+
             return "";
         }
 
-        public IList<IGitRef> GetTreeRefs(string tree)
+        public async Task<IList<IGitRef>> GetTreeRefsAsync(string tree)
         {
             var itemsStrings = tree.Split('\n');
 
             var gitRefs = new List<IGitRef>();
             var defaultHeads = new Dictionary<string, GitRef>(); // remote -> HEAD
-            var remotes = GetRemotes(false);
+            var remotes = await GetRemotesAsync(false).ConfigureAwait(false);
 
             foreach (var itemsString in itemsStrings)
             {
@@ -2822,7 +2834,7 @@ namespace GitCommands
         /// <param name="getLocal">Pass true to include local branches</param>
         /// <param name="getRemote">Pass true to include remote branches</param>
         /// <returns></returns>
-        public IEnumerable<string> GetAllBranchesWhichContainGivenCommit(string sha1, bool getLocal, bool getRemote)
+        public async Task<IEnumerable<string>> GetAllBranchesWhichContainGivenCommitAsync(string sha1, bool getLocal, bool getRemote)
         {
             string args = "--contains " + sha1;
             if (getRemote && getLocal)
@@ -2831,7 +2843,7 @@ namespace GitCommands
                 args = "-r " + args;
             else if (!getLocal)
                 return new string[] { };
-            string info = RunGitCmd("branch " + args);
+            string info = await RunGitCmdAsync("branch " + args).ConfigureAwait(false);
             if (info.Trim().StartsWith("fatal") || info.Trim().StartsWith("error:"))
                 return new List<string>();
 
@@ -2857,9 +2869,9 @@ namespace GitCommands
         /// </summary>
         /// <param name="sha1">The sha1.</param>
         /// <returns></returns>
-        public IEnumerable<string> GetAllTagsWhichContainGivenCommit(string sha1)
+        public async Task<IEnumerable<string>> GetAllTagsWhichContainGivenCommitAsync(string sha1)
         {
-            string info = RunGitCmd("tag --contains " + sha1, SystemEncoding);
+            string info = await RunGitCmdAsync("tag --contains " + sha1, SystemEncoding).ConfigureAwait(false);
 
             if (info.Trim().StartsWith("fatal") || info.Trim().StartsWith("error:"))
                 return new List<string>();
@@ -2870,14 +2882,14 @@ namespace GitCommands
         /// Returns tag's message. If the lightweight tag is passed, corresponding commit message
         /// is returned.
         /// </summary>
-        public string GetTagMessage(string tag)
+        public async Task<string> GetTagMessageAsync(string tag)
         {
             if (string.IsNullOrWhiteSpace(tag))
                 return null;
 
             tag = tag.Trim();
 
-            string info = RunGitCmd("tag -l -n10 " + tag, SystemEncoding);
+            string info = await RunGitCmdAsync("tag -l -n10 " + tag, SystemEncoding).ConfigureAwait(false);
 
             if (info.Trim().StartsWith("fatal") || info.Trim().StartsWith("error:"))
                 return null;
@@ -2897,7 +2909,7 @@ namespace GitCommands
         /// </summary>
         /// <param name="ignorePatterns">Patterns to ignore (.gitignore syntax)</param>
         /// <returns></returns>
-        public IList<string> GetIgnoredFiles(IEnumerable<string> ignorePatterns)
+        public async Task<IList<string>> GetIgnoredFilesAsync(IEnumerable<string> ignorePatterns)
         {
             var notEmptyPatterns = ignorePatterns
                     .Where(pattern => !pattern.IsNullOrWhiteSpace());
@@ -2909,7 +2921,7 @@ namespace GitCommands
                     .Join(" ");
                 // filter duplicates out of the result because options -c and -m may return
                 // same files at times
-                return RunGitCmd("ls-files -z -o -m -c -i " + excludeParams)
+                return (await RunGitCmdAsync("ls-files -z -o -m -c -i " + excludeParams).ConfigureAwait(false))
                     .Split(new[] { '\0', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                     .Distinct()
                     .ToList();
@@ -2920,13 +2932,13 @@ namespace GitCommands
             }
         }
 
-        public string[] GetFullTree(string id)
+        public async Task<string[]> GetFullTreeAsync(string id)
         {
-            string tree = this.RunCacheableCmd(AppSettings.GitCommand, String.Format("ls-tree -z -r --name-only {0}", id), SystemEncoding);
+            string tree = await this.RunCacheableCmdAsync(AppSettings.GitCommand, String.Format("ls-tree -z -r --name-only {0}", id), SystemEncoding).ConfigureAwait(false);
             return tree.Split(new char[] { '\0', '\n' });
         }
 
-        public IEnumerable<IGitItem> GetTree(string id, bool full)
+        public async Task<IEnumerable<IGitItem>> GetTreeAsync(string id, bool full)
         {
             string args = "-z";
             if (full)
@@ -2936,22 +2948,22 @@ namespace GitCommands
 
             if (GitRevision.IsFullSha1Hash(id))
             {
-                tree = this.RunCacheableCmd(AppSettings.GitCommand, "ls-tree " + args + " \"" + id + "\"", SystemEncoding);
+                tree = await this.RunCacheableCmdAsync(AppSettings.GitCommand, "ls-tree " + args + " \"" + id + "\"", SystemEncoding).ConfigureAwait(false);
             }
             else
             {
-                tree = this.RunCmd(AppSettings.GitCommand, "ls-tree " + args + " \"" + id + "\"", SystemEncoding);
+                tree = await this.RunCmdAsync(AppSettings.GitCommand, "ls-tree " + args + " \"" + id + "\"", SystemEncoding).ConfigureAwait(false);
             }
 
             return _gitTreeParser.Parse(tree);
         }
 
-        public GitBlame Blame(string filename, string from, Encoding encoding)
+        public async Task<GitBlame> BlameAsync(string filename, string from, Encoding encoding)
         {
-            return Blame(filename, from, null, encoding);
+            return await BlameAsync(filename, from, null, encoding).ConfigureAwait(false);
         }
 
-        public GitBlame Blame(string filename, string from, string lines, Encoding encoding)
+        public async Task<GitBlame> BlameAsync(string filename, string from, string lines, Encoding encoding)
         {
             from = from.ToPosixPath();
             filename = filename.ToPosixPath();
@@ -2963,11 +2975,11 @@ namespace GitCommands
 
             string blameCommand = $"blame --porcelain{detectCopyInFileOpt}{detectCopyInAllOpt}{ignoreWhitespaceOpt} -l{linesOpt} \"{from}\" -- \"{filename}\"";
             var itemsStrings =
-                RunCacheableCmd(
+                (await RunCacheableCmdAsync(
                     AppSettings.GitCommand,
                     blameCommand,
                     LosslessEncoding
-                    )
+                    ).ConfigureAwait(false))
                     .Split('\n');
 
             GitBlame blame = new GitBlame();
@@ -3037,12 +3049,12 @@ namespace GitCommands
             return blame;
         }
 
-        public string GetFileText(string id, Encoding encoding)
+        public async Task<string> GetFileTextAsync(string id, Encoding encoding)
         {
-            return RunCacheableCmd(AppSettings.GitCommand, "cat-file blob \"" + id + "\"", encoding);
+            return await RunCacheableCmdAsync(AppSettings.GitCommand, "cat-file blob \"" + id + "\"", encoding).ConfigureAwait(false);
         }
 
-        public string GetFileBlobHash(string fileName, string revision)
+        public async Task<string> GetFileBlobHashAsync(string fileName, string revision)
         {
             if (revision == GitRevision.UnstagedGuid) //working directory changes
             {
@@ -3051,7 +3063,7 @@ namespace GitCommands
             }
             if (revision == GitRevision.IndexGuid) //index
             {
-                string blob = RunGitCmd(string.Format("ls-files -s \"{0}\"", fileName));
+                string blob = await RunGitCmdAsync(string.Format("ls-files -s \"{0}\"", fileName)).ConfigureAwait(false);
                 string[] s = blob.Split(new char[] { ' ', '\t' });
                 if (s.Length >= 2)
                     return s[1];
@@ -3059,7 +3071,7 @@ namespace GitCommands
             }
             else
             {
-                string blob = RunGitCmd(string.Format("ls-tree -r {0} \"{1}\"", revision, fileName));
+                string blob = await RunGitCmdAsync(string.Format("ls-tree -r {0} \"{1}\"", revision, fileName)).ConfigureAwait(false);
                 string[] s = blob.Split(new char[] { ' ', '\t' });
                 if (s.Length >= 3)
                     return s[2];
@@ -3101,15 +3113,15 @@ namespace GitCommands
             return null;
         }
 
-        public IEnumerable<string> GetPreviousCommitMessages(int count)
+        public async Task<IEnumerable<string>> GetPreviousCommitMessagesAsync(int count)
         {
-            return GetPreviousCommitMessages("HEAD", count);
+            return await GetPreviousCommitMessagesAsync("HEAD", count).ConfigureAwait(false);
         }
 
-        public IEnumerable<string> GetPreviousCommitMessages(string revision, int count)
+        public async Task<IEnumerable<string>> GetPreviousCommitMessagesAsync(string revision, int count)
         {
             string sep = "d3fb081b9000598e658da93657bf822cc87b2bf6";
-            string output = RunGitCmd("log -n " + count + " " + revision + " --pretty=format:" + sep + "%e%n%s%n%n%b", LosslessEncoding);
+            string output = await RunGitCmdAsync("log -n " + count + " " + revision + " --pretty=format:" + sep + "%e%n%s%n%n%b", LosslessEncoding).ConfigureAwait(false);
             string[] messages = output.Split(new string[] { sep }, StringSplitOptions.RemoveEmptyEntries);
 
             if (messages.Length == 0)
@@ -3135,19 +3147,19 @@ namespace GitCommands
             return output;
         }
 
-        public string RevParse(string revisionExpression)
+        public async Task<string> RevParseAsync(string revisionExpression)
         {
             string revparseCommand = string.Format("rev-parse \"{0}~0\"", revisionExpression);
-            var result = RunGitCmdResult(revparseCommand);
+            var result = await RunGitCmdResultAsync(revparseCommand).ConfigureAwait(false);
             return result.ExitCode == 0 ? result.StdOutput.Split('\n')[0] : "";
         }
 
-        public string GetMergeBase(string a, string b)
+        public async Task<string> GetMergeBaseAsync(string a, string b)
         {
-            return RunGitCmd("merge-base " + a + " " + b).TrimEnd();
+            return (await RunGitCmdAsync("merge-base " + a + " " + b).ConfigureAwait(false)).TrimEnd();
         }
 
-        public SubmoduleStatus CheckSubmoduleStatus(string commit, string oldCommit, CommitData data, CommitData olddata, bool loaddata = false)
+        public async Task<SubmoduleStatus> CheckSubmoduleStatusAsync(string commit, string oldCommit, CommitData data, CommitData olddata, bool loaddata = false)
         {
             if (!IsValidGitWorkingDir() || oldCommit == null)
                 return SubmoduleStatus.NewSubmodule;
@@ -3155,7 +3167,7 @@ namespace GitCommands
             if (commit == null || commit == oldCommit)
                 return SubmoduleStatus.Unknown;
 
-            string baseCommit = GetMergeBase(commit, oldCommit);
+            string baseCommit = await GetMergeBaseAsync(commit, oldCommit).ConfigureAwait(false);
             if (baseCommit == oldCommit)
                 return SubmoduleStatus.FastForward;
             else if (baseCommit == commit)
@@ -3163,11 +3175,11 @@ namespace GitCommands
 
             string error = "";
             if (loaddata)
-                olddata = _commitDataManager.GetCommitData(oldCommit, ref error);
+                (olddata, error) = await _commitDataManager.GetCommitDataAsync(oldCommit).ConfigureAwait(false);
             if (olddata == null)
                 return SubmoduleStatus.NewSubmodule;
             if (loaddata)
-                data = _commitDataManager.GetCommitData(commit, ref error);
+                (data, error) = await _commitDataManager.GetCommitDataAsync(commit).ConfigureAwait(false);
             if (data == null)
                 return SubmoduleStatus.Unknown;
             if (data.CommitDate > olddata.CommitDate)
@@ -3179,9 +3191,9 @@ namespace GitCommands
             return SubmoduleStatus.Unknown;
         }
 
-        public SubmoduleStatus CheckSubmoduleStatus(string commit, string oldCommit)
+        public async Task<SubmoduleStatus> CheckSubmoduleStatusAsync(string commit, string oldCommit)
         {
-            return CheckSubmoduleStatus(commit, oldCommit, null, null, true);
+            return await CheckSubmoduleStatusAsync(commit, oldCommit, null, null, true).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -3189,7 +3201,7 @@ namespace GitCommands
         /// </summary>
         /// <param name="branchName">Branch name to test.</param>
         /// <returns>true if <see cref="branchName"/> is valid reference name, otherwise false.</returns>
-        public bool CheckBranchFormat([NotNull] string branchName)
+        public async Task<bool> CheckBranchFormatAsync([NotNull] string branchName)
         {
             if (branchName == null)
                 throw new ArgumentNullException("branchName");
@@ -3199,7 +3211,7 @@ namespace GitCommands
 
             branchName = branchName.Replace("\"", "\\\"");
 
-            var result = RunGitCmdResult(string.Format("check-ref-format --branch \"{0}\"", branchName));
+            var result = await RunGitCmdResultAsync(string.Format("check-ref-format --branch \"{0}\"", branchName)).ConfigureAwait(false);
             return result.ExitCode == 0;
         }
 
@@ -3208,19 +3220,19 @@ namespace GitCommands
         /// </summary>
         /// <param name="branchName">Branch name to test.</param>
         /// <returns>Well formed branch name.</returns>
-        public string FormatBranchName([NotNull] string branchName)
+        public async Task<string> FormatBranchNameAsync([NotNull] string branchName)
         {
             if (branchName == null)
                 throw new ArgumentNullException("branchName");
 
             string fullBranchName = GitCommandHelpers.GetFullBranchName(branchName);
-            if (String.IsNullOrEmpty(RevParse(fullBranchName)))
+            if (String.IsNullOrEmpty(await RevParseAsync(fullBranchName).ConfigureAwait(false)))
                 fullBranchName = branchName;
 
             return fullBranchName;
         }
 
-        public bool IsRunningGitProcess()
+        public async Task<bool> IsRunningGitProcessAsync()
         {
             if (_indexLockManager.IsIndexLocked())
             {
@@ -3235,7 +3247,7 @@ namespace GitCommands
             // Get processes by "ps" command.
             var cmd = Path.Combine(AppSettings.GitBinDir, "ps");
             var arguments = "x";
-            var output = RunCmd(cmd, arguments);
+            var output = await RunCmdAsync(cmd, arguments).ConfigureAwait(false);
             var lines = output.Split('\n');
             if (lines.Count() >= 2)
                 return false;
@@ -3466,9 +3478,9 @@ namespace GitCommands
             return branchName;
         }
 
-        public IList<GitItemStatus> GetCombinedDiffFileList(string shaOfMergeCommit)
+        public async Task<IList<GitItemStatus>> GetCombinedDiffFileListAsync(string shaOfMergeCommit)
         {
-            var fileList = RunGitCmd("diff-tree --name-only -z --cc --no-commit-id " + shaOfMergeCommit);
+            var fileList = await RunGitCmdAsync("diff-tree --name-only -z --cc --no-commit-id " + shaOfMergeCommit).ConfigureAwait(false);
 
             var ret = new List<GitItemStatus>();
             if (string.IsNullOrWhiteSpace(fileList))
@@ -3495,7 +3507,7 @@ namespace GitCommands
             return ret;
         }
 
-        public string GetCombinedDiffContent(GitRevision revisionOfMergeCommit, string filePath,
+        public async Task<string> GetCombinedDiffContentAsync(GitRevision revisionOfMergeCommit, string filePath,
             string extraArgs, Encoding encoding)
         {
             var cmd = string.Format("diff-tree {4} --no-commit-id {0} {1} {2} -- {3}",
@@ -3506,7 +3518,7 @@ namespace GitCommands
                 AppSettings.OmitUninterestingDiff ? "--cc" : "-c -p");
 
             var patchManager = new PatchManager();
-            var patch = RunCacheableCmd(AppSettings.GitCommand, cmd, LosslessEncoding);
+            var patch = await RunCacheableCmdAsync(AppSettings.GitCommand, cmd, LosslessEncoding).ConfigureAwait(false);
 
             if (string.IsNullOrWhiteSpace(patch))
             {
@@ -3517,14 +3529,14 @@ namespace GitCommands
             return GetPatch(patchManager, filePath, filePath).Text;
         }
 
-        public bool HasLfsSupport()
+        public async Task<bool> HasLfsSupportAsync()
         {
-            return RunGitCmdResult("lfs version").ExitedSuccessfully;
+            return (await RunGitCmdResultAsync("lfs version").ConfigureAwait(false)).ExitedSuccessfully;
         }
 
-        public bool StopTrackingFile(string filename)
+        public async Task<bool> StopTrackingFileAsync(string filename)
         {
-            return RunGitCmdResult("rm --cached " + filename).ExitedSuccessfully;
+            return (await RunGitCmdResultAsync("rm --cached " + filename).ConfigureAwait(false)).ExitedSuccessfully;
         }
     }
 }

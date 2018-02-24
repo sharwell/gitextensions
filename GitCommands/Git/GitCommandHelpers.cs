@@ -7,8 +7,10 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using GitCommands.Git;
 using GitCommands.Utils;
+using GitUI;
 using GitUIPluginInterfaces;
 using JetBrains.Annotations;
 
@@ -256,30 +258,29 @@ namespace GitCommands
             return StartProcessAndReadLines(arguments, cmd, workDir, stdInput);
         }
 
-        private static Process StartProcessAndReadAllText(string arguments, string cmd, string workDir, out string stdOutput, out string stdError, string stdInput)
+        private static async Task<(Process, string stdOutput, string stdError)> StartProcessAndReadAllTextAsync(string arguments, string cmd, string workDir, string stdInput)
         {
             if (string.IsNullOrEmpty(cmd))
             {
-                stdOutput = stdError = "";
-                return null;
+                return (null, "", "");
             }
 
             //process used to execute external commands
             var process = StartProcess(cmd, arguments, workDir, GitModule.SystemEncoding);
             if (!string.IsNullOrEmpty(stdInput))
             {
-                process.StandardInput.Write(stdInput);
+                await process.StandardInput.WriteAsync(stdInput).ConfigureAwait(false);
                 process.StandardInput.Close();
             }
 
-            SynchronizedProcessReader.Read(process, out stdOutput, out stdError);
-            return process;
+            var (stdOutput, stdError) = await SynchronizedProcessReader.ReadAsync(process).ConfigureAwait(false);
+            return (process, stdOutput, stdError);
         }
 
         /// <summary>
         /// Run command, console window is hidden, wait for exit, redirect output
         /// </summary>
-        public static string RunCmd(string cmd, string arguments)
+        public static async Task<string> RunCmdAsync(string cmd, string arguments)
         {
             try
             {
@@ -287,8 +288,8 @@ namespace GitCommands
 
                 arguments = arguments.Replace("$QUOTE$", "\\\"");
 
-                string output, error;
-                using (var process = StartProcessAndReadAllText(arguments, cmd, "", out output, out error, null))
+                var (process, output, error) = await StartProcessAndReadAllTextAsync(arguments, cmd, "", null).ConfigureAwait(false);
+                using (process)
                 {
                     process.WaitForExit();
                 }
@@ -305,45 +306,43 @@ namespace GitCommands
             }
         }
 
-        private static Process StartProcessAndReadAllBytes(string arguments, string cmd, string workDir, out byte[] stdOutput, out byte[] stdError, byte[] stdInput)
+        private static async Task<(Process, byte[] stdOutput, byte[] stdError)> StartProcessAndReadAllBytesAsync(string arguments, string cmd, string workDir, byte[] stdInput)
         {
             if (string.IsNullOrEmpty(cmd))
             {
-                stdOutput = stdError = null;
-                return null;
+                return (null, null, null);
             }
 
             //process used to execute external commands
             var process = StartProcess(cmd, arguments, workDir, Encoding.Default);
             if (stdInput != null && stdInput.Length > 0)
             {
-                process.StandardInput.BaseStream.Write(stdInput, 0, stdInput.Length);
+                await process.StandardInput.BaseStream.WriteAsync(stdInput, 0, stdInput.Length).ConfigureAwait(false);
                 process.StandardInput.Close();
             }
 
-            SynchronizedProcessReader.ReadBytes(process, out stdOutput, out stdError);
-
-            return process;
+            var (stdOutput, stdError) = await SynchronizedProcessReader.ReadBytesAsync(process).ConfigureAwait(false);
+            return (process, stdOutput, stdError);
         }
 
         /// <summary>
         /// Run command, console window is hidden, wait for exit, redirect output
         /// </summary>
-        public static int RunCmdByte(string cmd, string arguments, string workingdir, byte[] stdInput, out byte[] output, out byte[] error)
+        public static async Task<(int exitCode, byte[] output, byte[] error)> RunCmdByteAsync(string cmd, string arguments, string workingdir, byte[] stdInput)
         {
             try
             {
                 arguments = arguments.Replace("$QUOTE$", "\\\"");
-                using (var process = StartProcessAndReadAllBytes(arguments, cmd, workingdir, out output, out error, stdInput))
+                var (process, output, error) = await StartProcessAndReadAllBytesAsync(arguments, cmd, workingdir, stdInput).ConfigureAwait(false);
+                using (process)
                 {
                     process.WaitForExit();
-                    return process.ExitCode;
+                    return (process.ExitCode, output, error);
                 }
             }
             catch (Win32Exception)
             {
-                output = error = null;
-                return 1;
+                return (1, null, null);
             }
         }
 
@@ -357,7 +356,7 @@ namespace GitCommands
             {
                 if (_versionInUse == null || _versionInUse.IsUnknown)
                 {
-                    var result = RunCmd(AppSettings.GitCommand, "--version");
+                    var result = ThreadHelper.JoinableTaskFactory.Run(() => RunCmdAsync(AppSettings.GitCommand, "--version"));
                     _versionInUse = new GitVersion(result);
                 }
 
@@ -903,27 +902,27 @@ namespace GitCommands
         }
 
         [CanBeNull]
-        public static GitSubmoduleStatus GetCurrentSubmoduleChanges(GitModule module, string fileName, string oldFileName, bool staged)
+        public static async Task<GitSubmoduleStatus> GetCurrentSubmoduleChangesAsync(GitModule module, string fileName, string oldFileName, bool staged)
         {
-            PatchApply.Patch patch = module.GetCurrentChanges(fileName, oldFileName, staged, "", module.FilesEncoding);
+            PatchApply.Patch patch = await module.GetCurrentChangesAsync(fileName, oldFileName, staged, "", module.FilesEncoding).ConfigureAwait(false);
             string text = patch != null ? patch.Text : "";
-            return GetSubmoduleStatus(text, module, fileName);
+            return await GetSubmoduleStatusAsync(text, module, fileName).ConfigureAwait(false);
         }
 
         [CanBeNull]
-        public static GitSubmoduleStatus GetCurrentSubmoduleChanges(GitModule module, string submodule)
+        public static async Task<GitSubmoduleStatus> GetCurrentSubmoduleChangesAsync(GitModule module, string submodule)
         {
-            return GetCurrentSubmoduleChanges(module, submodule, submodule, false);
+            return await GetCurrentSubmoduleChangesAsync(module, submodule, submodule, false).ConfigureAwait(false);
         }
 
-        public static GitSubmoduleStatus GetSubmoduleStatus(string text, GitModule module, string fileName)
+        public static async Task<GitSubmoduleStatus> GetSubmoduleStatusAsync(string text, GitModule module, string fileName)
         {
             if (string.IsNullOrEmpty(text))
                 return null;
             var status = new GitSubmoduleStatus();
             using (StringReader reader = new StringReader(text))
             {
-                string line = reader.ReadLine();
+                string line = await reader.ReadLineAsync().ConfigureAwait(false);
 
                 if (line != null)
                 {
@@ -944,7 +943,7 @@ namespace GitCommands
                     }
                 }
 
-                while ((line = reader.ReadLine()) != null)
+                while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
                 {
                     if (!line.Contains("Subproject"))
                         continue;
@@ -973,8 +972,8 @@ namespace GitCommands
             if (status.OldCommit != null && status.Commit != null)
             {
                 var submodule = module.GetSubmodule(fileName);
-                status.AddedCommits = submodule.GetCommitCount(status.Commit, status.OldCommit);
-                status.RemovedCommits = submodule.GetCommitCount(status.OldCommit, status.Commit);
+                status.AddedCommits = await submodule.GetCommitCountAsync(status.Commit, status.OldCommit).ConfigureAwait(false);
+                status.RemovedCommits = await submodule.GetCommitCountAsync(status.OldCommit, status.Commit).ConfigureAwait(false);
             }
 
             return status;

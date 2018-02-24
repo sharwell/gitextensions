@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Threading.Tasks;
 using GitCommands.Git;
 
 namespace GitCommands
@@ -26,12 +27,12 @@ namespace GitCommands
 
         public CommitDto Dto { get; set; }
 
-        public void Execute(GitModule module)
+        public async Task ExecuteAsync(GitModule module)
         {
             if (Dto.Amend)
-                Dto.Result = module.RunGitCmd("commit --amend -m \"" + Dto.Message + "\"");
+                Dto.Result = await module.RunGitCmdAsync("commit --amend -m \"" + Dto.Message + "\"").ConfigureAwait(false);
             else
-                Dto.Result = module.RunGitCmd("commit -m \"" + Dto.Message + "\"");
+                Dto.Result = await module.RunGitCmdAsync("commit -m \"" + Dto.Message + "\"").ConfigureAwait(false);
         }
 
         public static void SetCommitMessage(GitModule module, string commitMessageText, bool amendCommit)

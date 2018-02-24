@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using GitCommands.Settings;
+using GitUI;
 
 namespace GitCommands.ExternalLinks
 {
@@ -26,7 +27,7 @@ namespace GitCommands.ExternalLinks
         {
             var definitions = _effectiveLinkDefinitionsProvider.Get(settings);
             return definitions.Where(definition => definition.Enabled)
-                              .SelectMany(definition => _externalLinkRevisionParser.Parse(revision, definition));
+                              .SelectMany(definition => ThreadHelper.JoinableTaskFactory.Run(() => _externalLinkRevisionParser.ParseAsync(revision, definition)));
         }
     }
 }

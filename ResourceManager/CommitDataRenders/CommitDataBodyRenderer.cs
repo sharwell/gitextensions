@@ -1,6 +1,8 @@
 using System;
 using System.Net;
+using System.Threading.Tasks;
 using GitCommands;
+using GitUI;
 using GitUIPluginInterfaces;
 
 namespace ResourceManager.CommitDataRenders
@@ -46,13 +48,12 @@ namespace ResourceManager.CommitDataRenders
 
             if (showRevisionsAsLinks)
             {
-                body = GitRevision.Sha1HashShortRegex.Replace(body, match => ProcessHashCandidate(match.Value));
+                body = GitRevision.Sha1HashShortRegex.Replace(body, match => ThreadHelper.JoinableTaskFactory.Run(() => ProcessHashCandidateAsync(match.Value)));
             }
             return body;
         }
 
-
-        private string ProcessHashCandidate(string hash)
+        private async Task<string> ProcessHashCandidateAsync(string hash)
         {
             var module = _getModule();
             if (module == null)
@@ -60,11 +61,12 @@ namespace ResourceManager.CommitDataRenders
                 return hash;
             }
 
-            string fullHash;
-            if (!module.IsExistingCommitHash(hash, out fullHash))
+            (bool isHash, string fullHash) = await module.IsExistingCommitHashAsync(hash).ConfigureAwait(false);
+            if (!isHash)
             {
-                return hash;
+                return null;
             }
+
             return _linkFactory.CreateCommitLink(fullHash, hash, true);
         }
 

@@ -11,21 +11,24 @@ namespace GitCommands
         public byte[] Output { get; private set; }
         public byte[] Error { get; private set; }
 
+        private readonly TaskCompletionSource<VoidResult> exitedCompletionSource = new TaskCompletionSource<VoidResult>();
         private readonly Task stdOutReadTask;
         private readonly Task stdErrReadTask;
 
         public SynchronizedProcessReader(Process process)
         {
             Process = process;
+            process.EnableRaisingEvents = true;
+            process.Exited += delegate { exitedCompletionSource.SetResult(default(VoidResult)); };
             stdOutReadTask = Task.Run(async () => Output = await process.StandardOutput.BaseStream.ReadToEndAsync());
             stdErrReadTask = Task.Run(async () => Error = await process.StandardError.BaseStream.ReadToEndAsync());
         }
 
-        public void WaitForExit()
+        public async Task WaitForExitAsync()
         {
-            stdOutReadTask.Wait();
-            stdErrReadTask.Wait();
-            Process.WaitForExit();
+            await stdOutReadTask.ConfigureAwait(false);
+            await stdErrReadTask.ConfigureAwait(false);
+            await exitedCompletionSource.Task.ConfigureAwait(false);
         }
 
         public string OutputString(Encoding encoding)
@@ -48,13 +51,12 @@ namespace GitCommands
         /// <para />
         /// If raw byte streams are required, use <see cref="ReadBytes"/> instead.
         /// </remarks>
-        public static void Read(Process process, out string stdOutput, out string stdError)
+        public static async Task<(string stdOutput, string stdError)> ReadAsync(Process process)
         {
-            var stdOutTask = Task.Run(async () => await process.StandardOutput.ReadToEndAsync());
-            var stdErrTask = Task.Run(async () => await process.StandardError.ReadToEndAsync());
+            var stdOutput = await process.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+            var stdError = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
 
-            stdOutput = stdOutTask.GetAwaiter().GetResult();
-            stdError = stdErrTask.GetAwaiter().GetResult();
+            return (stdOutput, stdError);
         }
 
         /// <summary>
@@ -67,13 +69,16 @@ namespace GitCommands
         /// <para />
         /// To use the process's default encoding, use <see cref="Read"/> instead.
         /// </remarks>
-        public static void ReadBytes(Process process, out byte[] stdOutput, out byte[] stdError)
+        public static async Task<(byte[] stdOutput, byte[] stdError)> ReadBytesAsync(Process process)
         {
-            var stdOutTask = Task.Run(async () => await process.StandardOutput.BaseStream.ReadToEndAsync());
-            var stdErrTask = Task.Run(async () => await process.StandardError.BaseStream.ReadToEndAsync());
+            var stdOutput = await process.StandardOutput.BaseStream.ReadToEndAsync().ConfigureAwait(false);
+            var stdError = await process.StandardError.BaseStream.ReadToEndAsync().ConfigureAwait(false);
 
-            stdOutput = stdOutTask.GetAwaiter().GetResult();
-            stdError = stdErrTask.GetAwaiter().GetResult();
+            return (stdOutput, stdError);
+        }
+
+        private struct VoidResult
+        {
         }
     }
 

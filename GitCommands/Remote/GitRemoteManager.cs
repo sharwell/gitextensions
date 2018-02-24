@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Threading.Tasks;
 using GitCommands.Config;
 using GitUIPluginInterfaces;
 
@@ -9,7 +10,7 @@ namespace GitCommands.Remote
 {
     public interface IGitRemoteManager
     {
-        void ConfigureRemotes(string remoteName);
+        Task ConfigureRemotesAsync(string remoteName);
 
         /// <summary>
         /// Returns the default remote for push operation.
@@ -23,14 +24,14 @@ namespace GitCommands.Remote
         /// Loads the list of remotes configured in .git/config file.
         /// </summary>
         /// <param name="loadDisabled"></param>
-        IEnumerable<GitRemote> LoadRemotes(bool loadDisabled);
+        Task<IEnumerable<GitRemote>> LoadRemotesAsync(bool loadDisabled);
 
         /// <summary>
         /// Removes the specified remote from .git/config file.
         /// </summary>
         /// <param name="remote">Remote to remove.</param>
         /// <returns>Output of the operation.</returns>
-        string RemoveRemote(GitRemote remote);
+        Task<string> RemoveRemoteAsync(GitRemote remote);
 
         /// <summary>
         ///   Saves the remote details by creating a new or updating an existing remote entry in .git/config file.
@@ -47,14 +48,14 @@ namespace GitCommands.Remote
         /// <param name="remotePushUrl">An optional alternative remote push URL.</param>
         /// <param name="remotePuttySshKey">An optional Putty SSH key.</param>
         /// <returns>Result of the operation.</returns>
-        GitRemoteSaveResult SaveRemote(GitRemote remote, string remoteName, string remoteUrl, string remotePushUrl, string remotePuttySshKey);
+        Task<GitRemoteSaveResult> SaveRemoteAsync(GitRemote remote, string remoteName, string remoteUrl, string remotePushUrl, string remotePuttySshKey);
 
         /// <summary>
         ///  Marks the remote as enabled or disabled in .git/config file.
         /// </summary>
         /// <param name="remoteName">The name of the remote.</param>
         /// <param name="disabled"></param>
-        void ToggleRemoteState(string remoteName, bool disabled);
+        Task ToggleRemoteStateAsync(string remoteName, bool disabled);
     }
 
     public class GitRemoteManager : IGitRemoteManager
@@ -72,14 +73,14 @@ namespace GitCommands.Remote
 
         // TODO: moved verbatim from FormRemotes.cs, perhaps needs refactoring
         [SuppressMessage("ReSharper", "RedundantArgumentDefaultValue")]
-        public void ConfigureRemotes(string remoteName)
+        public async Task ConfigureRemotesAsync(string remoteName)
         {
             var _module = GetModule();
             var localConfig = _module.LocalConfigFile;
 
-            foreach (var remoteHead in _module.GetRefs(true, true))
+            foreach (var remoteHead in await _module.GetRefsAsync(true, true).ConfigureAwait(false))
             {
-                foreach (var localHead in _module.GetRefs(true, true))
+                foreach (var localHead in await _module.GetRefsAsync(true, true).ConfigureAwait(false))
                 {
                     if (!remoteHead.IsRemote ||
                         localHead.IsRemote ||
@@ -145,7 +146,7 @@ namespace GitCommands.Remote
         /// Loads the list of remotes configured in .git/config file.
         /// </summary>
         // TODO: candidate for Async implementations
-        public IEnumerable<GitRemote> LoadRemotes(bool loadDisabled)
+        public async Task<IEnumerable<GitRemote>> LoadRemotesAsync(bool loadDisabled)
         {
             var remotes = new List<GitRemote>();
             var module = _getModule();
@@ -154,10 +155,10 @@ namespace GitCommands.Remote
                 return remotes;
             }
 
-            PopulateRemotes(remotes, true);
+            await PopulateRemotesAsync(remotes, true).ConfigureAwait(false);
             if (loadDisabled)
             {
-                PopulateRemotes(remotes, false);
+                await PopulateRemotesAsync(remotes, false).ConfigureAwait(false);
             }
 
             return remotes.OrderBy(x => x.Name);
@@ -168,7 +169,7 @@ namespace GitCommands.Remote
         /// </summary>
         /// <param name="remote">Remote to remove.</param>
         /// <returns>Output of <see cref="IGitModule.RemoveRemote"/> operation, if the remote is active; otherwise <see cref="string.Empty"/>.</returns>
-        public string RemoveRemote(GitRemote remote)
+        public async Task<string> RemoveRemoteAsync(GitRemote remote)
         {
             if (remote == null)
             {
@@ -178,7 +179,7 @@ namespace GitCommands.Remote
             var module = GetModule();
             if (!remote.Disabled)
             {
-                return module.RemoveRemote(remote.Name);
+                return await module.RemoveRemoteAsync(remote.Name).ConfigureAwait(false);
             }
 
             var sectionName = $"{DisabledSectionPrefix}{SectionRemote}.{remote.Name}";
@@ -201,7 +202,7 @@ namespace GitCommands.Remote
         /// <param name="remotePushUrl">An optional alternative remote push URL.</param>
         /// <param name="remotePuttySshKey">An optional Putty SSH key.</param>
         /// <returns>Result of the operation.</returns>
-        public GitRemoteSaveResult SaveRemote(GitRemote remote, string remoteName, string remoteUrl, string remotePushUrl, string remotePuttySshKey)
+        public async Task<GitRemoteSaveResult> SaveRemoteAsync(GitRemote remote, string remoteName, string remoteUrl, string remotePushUrl, string remotePuttySshKey)
         {
             if (string.IsNullOrWhiteSpace(remoteName))
             {
@@ -220,7 +221,7 @@ namespace GitCommands.Remote
             bool remoteDisabled = false;
             if (creatingNew)
             {
-                output = module.AddRemote(remoteName, remoteUrl);
+                output = await module.AddRemoteAsync(remoteName, remoteUrl).ConfigureAwait(false);
                 updateRemoteRequired = true;
             }
             else
@@ -237,7 +238,7 @@ namespace GitCommands.Remote
                 if (!string.Equals(remote.Name, remoteName, StringComparison.OrdinalIgnoreCase))
                 {
                     // the name of the remote changed - perform rename
-                    output = module.RenameRemote(remote.Name, remoteName);
+                    output = await module.RenameRemoteAsync(remote.Name, remoteName).ConfigureAwait(false);
                 }
 
                 if (!string.Equals(remote.Url, remoteUrl, StringComparison.OrdinalIgnoreCase))
@@ -259,7 +260,7 @@ namespace GitCommands.Remote
         /// </summary>
         /// <param name="remoteName">An existing remote instance.</param>
         /// <param name="disabled">The new state of the remote. <see langword="true"/> to disable the remote; otherwise <see langword="false"/>.</param>
-        public void ToggleRemoteState(string remoteName, bool disabled)
+        public async Task ToggleRemoteStateAsync(string remoteName, bool disabled)
         {
             if (string.IsNullOrWhiteSpace(remoteName))
             {
@@ -280,7 +281,7 @@ namespace GitCommands.Remote
 
             if (disabled)
             {
-                module.RemoveRemote(remoteName);
+                await module.RemoveRemoteAsync(remoteName).ConfigureAwait(false);
             }
             else
             {
@@ -296,21 +297,21 @@ namespace GitCommands.Remote
 
 
         // pass the list in to minimise allocations
-        private void PopulateRemotes(List<GitRemote> allRemotes, bool enabled)
+        private async Task PopulateRemotesAsync(List<GitRemote> allRemotes, bool enabled)
         {
             var module = GetModule();
-            Func<string[]> func;
+            Func<Task<string[]>> func;
             if (enabled)
             {
-                func = module.GetRemotes;
+                func = module.GetRemotesAsync;
             }
             else
             {
-                func = GetDisabledRemotes;
+                func = () => Task.FromResult(GetDisabledRemotes());
             }
 
 
-            var gitRemotes = func().Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            var gitRemotes = (await func().ConfigureAwait(false)).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
             if (gitRemotes.Any())
             {
                 allRemotes.AddRange(gitRemotes.Select(remote => new GitRemote

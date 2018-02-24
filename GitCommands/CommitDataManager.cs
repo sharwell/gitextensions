@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using GitUIPluginInterfaces;
 
 namespace GitCommands
@@ -28,7 +29,7 @@ namespace GitCommands
         /// <summary>
         /// Gets the commit info for submodule.
         /// </summary>
-        CommitData GetCommitData(string sha1, ref string error);
+        Task<(CommitData, string error)> GetCommitDataAsync(string sha1);
 
         /// <summary>
         /// Creates a CommitData object from formated commit info data from git.  The string passed in should be
@@ -42,7 +43,7 @@ namespace GitCommands
         /// <summary>
         /// Gets the commit info for submodule.
         /// </summary>
-        void UpdateCommitMessage(CommitData data, string sha1, ref string error);
+        Task<(bool hasError, string error)> UpdateCommitMessageAsync(CommitData data, string sha1);
 
     }
 
@@ -62,7 +63,7 @@ namespace GitCommands
         /// <summary>
         /// Gets the commit info for submodule.
         /// </summary>
-        public void UpdateCommitMessage(CommitData data, string sha1, ref string error)
+        public async Task<(bool hasError, string error)> UpdateCommitMessageAsync(CommitData data, string sha1)
         {
             var module = GetModule();
             if (sha1 == null)
@@ -71,34 +72,32 @@ namespace GitCommands
             //Do not cache this command, since notes can be added
             string arguments = string.Format(CultureInfo.InvariantCulture,
                 "log -1 --pretty=\"format:" + ShortLogFormat + "\" {0}", sha1);
-            var info = module.RunGitCmd(arguments, GitModule.LosslessEncoding);
+            var info = await module.RunGitCmdAsync(arguments, GitModule.LosslessEncoding).ConfigureAwait(false);
 
             if (info.Trim().StartsWith("fatal"))
             {
-                error = "Cannot find commit " + sha1;
-                return;
+                return (true, "Cannot find commit " + sha1);
             }
 
             int index = info.IndexOf(sha1) + sha1.Length;
 
             if (index < 0)
             {
-                error = "Cannot find commit " + sha1;
-                return;
+                return (true, "Cannot find commit " + sha1);
             }
             if (index >= info.Length)
             {
-                error = info;
-                return;
+                return (true, info);
             }
 
             UpdateBodyInCommitData(data, info);
+            return (false, null);
         }
 
         /// <summary>
         /// Gets the commit info for submodule.
         /// </summary>
-        public CommitData GetCommitData(string sha1, ref string error)
+        public async Task<(CommitData, string error)> GetCommitDataAsync(string sha1)
         {
             var module = GetModule();
             if (sha1 == null)
@@ -107,30 +106,27 @@ namespace GitCommands
             //Do not cache this command, since notes can be added
             string arguments = string.Format(CultureInfo.InvariantCulture,
                 "log -1 --pretty=\"format:" + LogFormat + "\" {0}", sha1);
-            var info = module.RunGitCmd(arguments, GitModule.LosslessEncoding);
+            var info = await module.RunGitCmdAsync(arguments, GitModule.LosslessEncoding).ConfigureAwait(false);
 
             if (info.Trim().StartsWith("fatal"))
             {
-                error = "Cannot find commit " + sha1;
-                return null;
+                return (null, "Cannot find commit " + sha1);
             }
 
             int index = info.IndexOf(sha1) + sha1.Length;
 
             if (index < 0)
             {
-                error = "Cannot find commit " + sha1;
-                return null;
+                return (null, "Cannot find commit " + sha1);
             }
             if (index >= info.Length)
             {
-                error = info;
-                return null;
+                return (null, info);
             }
 
             CommitData commitInformation = CreateFromFormatedData(info);
 
-            return commitInformation;
+            return (commitInformation, null);
         }
 
         /// <summary>

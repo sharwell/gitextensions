@@ -1,4 +1,6 @@
-﻿namespace GitCommands
+﻿using System.Threading.Tasks;
+
+namespace GitCommands
 {
     public class GitSubmoduleStatus
     {
@@ -21,13 +23,13 @@
             return module.GetSubmodule(Name);
         }
 
-        public void CheckSubmoduleStatus(GitModule submodule)
+        public async Task CheckSubmoduleStatusAsync(GitModule submodule)
         {
             Status = SubmoduleStatus.NewSubmodule;
             if (submodule == null)
                 return;
 
-            Status = submodule.CheckSubmoduleStatus(Commit, OldCommit);
+            Status = await submodule.CheckSubmoduleStatusAsync(Commit, OldCommit).ConfigureAwait(false);
         }
 
         public string AddedAndRemovedString()

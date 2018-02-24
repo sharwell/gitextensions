@@ -1,5 +1,6 @@
 ﻿using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace GitCommands
 {
@@ -49,15 +50,15 @@ namespace GitCommands
             return sb.ToString();
         }
 
-        public static bool CheckRefsRemoteSvn(GitModule aModule)
+        public static async Task<bool> CheckRefsRemoteSvnAsync(GitModule aModule)
         {
-            string svnremote = GetConfigSvnRemoteFetch(aModule);
+            string svnremote = await GetConfigSvnRemoteFetchAsync(aModule).ConfigureAwait(false);
             return svnremote != null && svnremote.Trim().Contains(":refs/remote");
         }
 
-        public static string GetConfigSvnRemoteFetch(GitModule aModule)
+        public static async Task<string> GetConfigSvnRemoteFetchAsync(GitModule aModule)
         {
-            return aModule.RunGitCmd("config svn-remote.svn.fetch");
+            return await aModule.RunGitCmdAsync("config svn-remote.svn.fetch").ConfigureAwait(false);
         }
 
         public static string RebaseCmd()

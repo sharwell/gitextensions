@@ -496,7 +496,7 @@ namespace GitUI
 
                 case Keys.Delete:
                     {
-                        string currentBranch = Module.GetSelectedBranch();
+                        string currentBranch = ThreadHelper.JoinableTaskFactory.Run(() => Module.GetSelectedBranchAsync());
                         InitiateRefAction(gitRefListsForRevision.GetDeletableLocalRefs(currentBranch),
                                           gitRef =>
                                           {
@@ -936,10 +936,10 @@ namespace GitUI
             return Revisions.GetRowData(aRow);
         }
 
-        public GitRevision GetCurrentRevision()
+        public async Task<GitRevision> GetCurrentRevisionAsync()
         {
-            var revision = Module.GetRevision(CurrentCheckout, true);
-            var refs = Module.GetRefs(true, true);
+            var revision = await Module.GetRevisionAsync(CurrentCheckout, true).ConfigureAwait(false);
+            var refs = await Module.GetRefsAsync(true, true).ConfigureAwait(false);
             foreach (var gitRef in refs)
             {
                 if (gitRef.Guid.Equals(revision.Guid))
@@ -1072,7 +1072,7 @@ namespace GitUI
 
         private string _filtredCurrentCheckout;
 
-        public void ForceRefreshRevisions()
+        public async Task ForceRefreshRevisionsAsync()
         {
             try
             {
@@ -1087,8 +1087,9 @@ namespace GitUI
 
                 DisposeRevisionGraphCommand();
 
-                var newCurrentCheckout = Module.GetCurrentCheckout();
+                var newCurrentCheckout = await Module.GetCurrentCheckoutAsync().ConfigureAwait(true);
                 GitModule capturedModule = Module;
+
                 Task<SuperProjectInfo> newSuperPrjectInfo =
                     Task.Run(() => GetSuperprojectCheckout(ShowRemoteRef, capturedModule));
                 newSuperPrjectInfo.ContinueWith((task) => Refresh(),

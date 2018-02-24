@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GitUIPluginInterfaces;
+using Microsoft.VisualStudio.Threading;
 
 namespace GitCommands.Gpg
 {
@@ -37,7 +38,7 @@ namespace GitCommands.Gpg
         /// Obtain the commit verification message, coming from --pretty="format:%GG" 
         /// </summary>
         /// <returns>Full string coming from GPG analysis on current revision.</returns>
-        string GetCommitVerificationMessage(GitRevision revision);
+        Task<string> GetCommitVerificationMessageAsync(GitRevision revision);
 
         /// <summary>
         /// Obtain the tag status on current revision.
@@ -49,7 +50,7 @@ namespace GitCommands.Gpg
         /// Obtain the tag verification message for all the tag in current git revision 
         /// </summary>
         /// <returns>Full concatenated string coming from GPG analysis on all tags on current git revision.</returns>
-        string GetTagVerifyMessage(GitRevision revision);
+        Task<string> GetTagVerifyMessageAsync(GitRevision revision);
     }
 
 
@@ -102,35 +103,32 @@ namespace GitCommands.Gpg
 
             var module = GetModule();
 
-            return await Task.Run(() =>
+            CommitStatus cmtStatus;
+
+            string gpg = await module.RunGitCmdAsync($"log --pretty=\"format:%G?\" -1 {revision.Guid}").ConfigureAwait(false);
+
+            switch (gpg)
             {
-                CommitStatus cmtStatus;
+                case GoodSign:         // "G" for a good (valid) signature
+                    cmtStatus = CommitStatus.GoodSignature;
+                    break;
+                case BadSign:          // "B" for a bad signature
+                case UnkSignValidity:  // "U" for a good signature with unknown validity 
+                case ExpiredSign:      // "X" for a good signature that has expired
+                case ExpiredSignKey:   // "Y" for a good signature made by an expired key
+                case RevokedKey:       // "R" for a good signature made by a revoked key
+                    cmtStatus = CommitStatus.SignatureError;
+                    break;
+                case MissingPubKey:    // "E" if the signature cannot be checked (e.g.missing key)
+                    cmtStatus = CommitStatus.MissingPublicKey;
+                    break;
+                case NoSign:           // "N" for no signature
+                default:
+                    cmtStatus = CommitStatus.NoSignature;
+                    break;
+            }
 
-                string gpg = module.RunGitCmd($"log --pretty=\"format:%G?\" -1 {revision.Guid}");
-
-                switch (gpg)
-                {
-                    case GoodSign:         // "G" for a good (valid) signature
-                        cmtStatus = CommitStatus.GoodSignature;
-                        break;
-                    case BadSign:          // "B" for a bad signature
-                    case UnkSignValidity:  // "U" for a good signature with unknown validity 
-                    case ExpiredSign:      // "X" for a good signature that has expired
-                    case ExpiredSignKey:   // "Y" for a good signature made by an expired key
-                    case RevokedKey:       // "R" for a good signature made by a revoked key
-                        cmtStatus = CommitStatus.SignatureError;
-                        break;
-                    case MissingPubKey:    // "E" if the signature cannot be checked (e.g.missing key)
-                        cmtStatus = CommitStatus.MissingPublicKey;
-                        break;
-                    case NoSign:           // "N" for no signature
-                    default:
-                        cmtStatus = CommitStatus.NoSignature;
-                        break;
-                }
-
-                return cmtStatus;
-            });
+            return cmtStatus;
         }
 
         /// <summary>
@@ -153,61 +151,58 @@ namespace GitCommands.Gpg
                 return tagStatus;
             }
 
-            return await Task.Run(() =>
+            /* More than one tag on the revision */
+            if (usefulTagRefs.Count > 1)
             {
-                /* More than one tag on the revision */
-                if (usefulTagRefs.Count > 1)
+                tagStatus = TagStatus.Many;
+            }
+            else
+            {
+                /* Raw message to be checked */
+                string rawGpgMessage = await GetTagVerificationMessageAsync(usefulTagRefs[0], true).ConfigureAwait(false);
+
+                /* Look for icon to be shown */
+                var goodSignatureMatch = GoodSignatureTagRegex.Match(rawGpgMessage);
+                var validSignatureMatch = ValidSignatureTagRegex.Match(rawGpgMessage);
+
+                if (goodSignatureMatch.Success && validSignatureMatch.Success)
                 {
-                    tagStatus = TagStatus.Many;
+                    /* It's only one good tag */
+                    tagStatus = TagStatus.OneGood;
                 }
                 else
                 {
-                    /* Raw message to be checked */
-                    string rawGpgMessage = GetTagVerificationMessage(usefulTagRefs[0], true);
-
-                    /* Look for icon to be shown */
-                    var goodSignatureMatch = GoodSignatureTagRegex.Match(rawGpgMessage);
-                    var validSignatureMatch = ValidSignatureTagRegex.Match(rawGpgMessage);
-
-                    if (goodSignatureMatch.Success && validSignatureMatch.Success)
+                    Match noSignature = NoSignatureFoundTagRegex.Match(rawGpgMessage);
+                    if (noSignature.Success)
                     {
-                        /* It's only one good tag */
-                        tagStatus = TagStatus.OneGood;
+                        /* One tag, but not signed */
+                        tagStatus = TagStatus.TagNotSigned;
                     }
                     else
                     {
-                        Match noSignature = NoSignatureFoundTagRegex.Match(rawGpgMessage);
-                        if (noSignature.Success)
+                        Match noPubKeyMatch = NoPubKeyTagRegex.Match(rawGpgMessage);
+                        if (noPubKeyMatch.Success)
                         {
-                            /* One tag, but not signed */
-                            tagStatus = TagStatus.TagNotSigned;
+                            /* One tag, signed, but user has not the public key */
+                            tagStatus = TagStatus.NoPubKey;
                         }
                         else
                         {
-                            Match noPubKeyMatch = NoPubKeyTagRegex.Match(rawGpgMessage);
-                            if (noPubKeyMatch.Success)
-                            {
-                                /* One tag, signed, but user has not the public key */
-                                tagStatus = TagStatus.NoPubKey;
-                            }
-                            else
-                            {
-                                /* One tag, signed, any other error */
-                                tagStatus = TagStatus.OneBad;
-                            }
+                            /* One tag, signed, any other error */
+                            tagStatus = TagStatus.OneBad;
                         }
                     }
                 }
+            }
 
-                return tagStatus;
-            });
+            return tagStatus;
         }
 
         /// <summary>
         /// Obtain the commit verification message, coming from --pretty="format:%GG" 
         /// </summary>
         /// <returns>Full string coming from GPG analysis on current revision.</returns>
-        public string GetCommitVerificationMessage(GitRevision revision)
+        public async Task<string> GetCommitVerificationMessageAsync(GitRevision revision)
         {
             if (revision == null)
             {
@@ -215,14 +210,14 @@ namespace GitCommands.Gpg
             }
 
             var module = GetModule();
-            return module.RunGitCmd($"log --pretty=\"format:%GG\" -1 {revision.Guid}");
+            return await module.RunGitCmdAsync($"log --pretty=\"format:%GG\" -1 {revision.Guid}").ConfigureAwait(false);
         }
 
         /// <summary>
         /// Obtain the tag verification message for all the tag on the revision 
         /// </summary>
         /// <returns>Full string coming from GPG analysis on current revision.</returns>
-        public string GetTagVerifyMessage(GitRevision revision)
+        public async Task<string> GetTagVerifyMessageAsync(GitRevision revision)
         {
             if (revision == null)
             {
@@ -230,11 +225,11 @@ namespace GitCommands.Gpg
             }
 
             var usefulTagRefs = revision.Refs.Where(x => x.IsTag && x.IsDereference).ToList<IGitRef>();
-            return EvaluateTagVerifyMessage(usefulTagRefs);
+            return await EvaluateTagVerifyMessageAsync(usefulTagRefs).ConfigureAwait(false);
         }
 
 
-        private string GetTagVerificationMessage(IGitRef tagRef, bool raw = true)
+        private async Task<string> GetTagVerificationMessageAsync(IGitRef tagRef, bool raw = true)
         {
             string tagName = tagRef.LocalName;
             if (string.IsNullOrWhiteSpace(tagName))
@@ -243,10 +238,10 @@ namespace GitCommands.Gpg
             string rawFlag = raw == true ? "--raw" : "";
 
             var module = GetModule();
-            return module.RunGitCmd($"verify-tag {rawFlag} {tagName}");
+            return await module.RunGitCmdAsync($"verify-tag {rawFlag} {tagName}").ConfigureAwait(false);
         }
 
-        private string EvaluateTagVerifyMessage(IList<IGitRef> usefulTagRefs)
+        private async Task<string> EvaluateTagVerifyMessageAsync(IList<IGitRef> usefulTagRefs)
         {
             if (usefulTagRefs.Count == 0)
             {
@@ -255,7 +250,7 @@ namespace GitCommands.Gpg
 
             if (usefulTagRefs.Count == 1)
             {
-                return GetTagVerificationMessage(usefulTagRefs[0], false);
+                return await GetTagVerificationMessageAsync(usefulTagRefs[0], false).ConfigureAwait(false);
             }
 
             /* When _usefulTagRefs.Count > 1 */
@@ -265,7 +260,7 @@ namespace GitCommands.Gpg
             foreach (var tagRef in usefulTagRefs)
             {
                 /* String printed in dialog box */
-                tagVerifyMessage = $"{tagVerifyMessage}{tagRef.LocalName}\r\n{GetTagVerificationMessage(tagRef, false)}\r\n\r\n";
+                tagVerifyMessage = $"{tagVerifyMessage}{tagRef.LocalName}\r\n{await GetTagVerificationMessageAsync(tagRef, false).ConfigureAwait(false)}\r\n\r\n";
             }
             return tagVerifyMessage;
         }

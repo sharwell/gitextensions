@@ -1,24 +1,25 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using GitUIPluginInterfaces;
 
 namespace GitCommands.Statistics
 {
     public static class CommitCounter
     {
-        public static Tuple<Dictionary<string, int>, int> GroupAllCommitsByContributor(IGitModule module)
+        public static async Task<Tuple<Dictionary<string, int>, int>> GroupAllCommitsByContributorAsync(IGitModule module)
         {
-            return GroupAllCommitsByContributor(module, DateTime.MinValue, DateTime.MaxValue);
+            return await GroupAllCommitsByContributorAsync(module, DateTime.MinValue, DateTime.MaxValue).ConfigureAwait(false);
         }
 
-        private static Tuple<Dictionary<string, int>, int> GroupAllCommitsByContributor(IGitModule module, DateTime since, DateTime until)
+        private static async Task<Tuple<Dictionary<string, int>, int>> GroupAllCommitsByContributorAsync(IGitModule module, DateTime since, DateTime until)
         {
             var sinceParam = since != DateTime.MinValue ? GetDateParameter(since, "since") : "";
             var untilParam = until != DateTime.MaxValue ? GetDateParameter(since, "until") : "";
 
             var unformattedCommitsPerContributor =
-                module.RunGitCmd(
-                        "shortlog --all -s -n --no-merges" + sinceParam + untilParam)
+                (await module.RunGitCmdAsync(
+                        "shortlog --all -s -n --no-merges" + sinceParam + untilParam).ConfigureAwait(false))
                     .Split('\n');
 
             return ParseCommitsPerContributor(unformattedCommitsPerContributor);

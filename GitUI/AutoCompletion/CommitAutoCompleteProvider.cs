@@ -29,7 +29,7 @@ namespace GitUI.AutoCompletion
 
             var autoCompleteWords = new HashSet<string>();
 
-            foreach (var file in _module.GetAllChangedFiles())
+            foreach (var file in await _module.GetAllChangedFilesAsync().ConfigureAwait(false))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -37,7 +37,7 @@ namespace GitUI.AutoCompletion
 
                 if (regex != null)
                 {
-                    var text = GetChangedFileText(_module, file);
+                    var text = await GetChangedFileTextAsync(_module, file).ConfigureAwait(false);
                     var matches = regex.Matches(text);
                     foreach (Match match in matches)
                             // Skip first group since it always contains the entire matched string (regardless of capture groups)
@@ -103,15 +103,14 @@ namespace GitUI.AutoCompletion
             return regexes;
         }
 
-        private static string GetChangedFileText (GitModule module, GitItemStatus file)
+        private static async Task<string> GetChangedFileTextAsync(GitModule module, GitItemStatus file)
         {
-            var changes = module.GetCurrentChanges(file.Name, file.OldName, file.IsStaged, "-U1000000", module.FilesEncoding);
+            var changes = await module.GetCurrentChangesAsync(file.Name, file.OldName, file.IsStaged, "-U1000000", module.FilesEncoding).ConfigureAwait(false);
 
             if (changes != null)
                 return changes.Text;
 
-            var content = module.GetFileContents(file);
-
+            var content = await module.GetFileContentsAsync(file).ConfigureAwait(false);
             if (content != null)
                 return content;
 

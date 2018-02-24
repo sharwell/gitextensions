@@ -2,13 +2,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using GitCommands.Remote;
 
 namespace GitCommands.ExternalLinks
 {
     public interface IExternalLinkRevisionParser
     {
-        IEnumerable<ExternalLink> Parse(GitRevision revision, ExternalLinkDefinition definition);
+        Task<IEnumerable<ExternalLink>> ParseAsync(GitRevision revision, ExternalLinkDefinition definition);
     }
 
     public sealed class ExternalLinkRevisionParser : IExternalLinkRevisionParser
@@ -22,9 +23,9 @@ namespace GitCommands.ExternalLinks
         }
 
 
-        public IEnumerable<ExternalLink> Parse(GitRevision revision, ExternalLinkDefinition definition)
+        public async Task<IEnumerable<ExternalLink>> ParseAsync(GitRevision revision, ExternalLinkDefinition definition)
         {
-            var remoteMatches = ParseRemotes(definition);
+            var remoteMatches = await ParseRemotesAsync(definition).ConfigureAwait(false);
             return remoteMatches.SelectMany(remoteMatch => ParseRevision(revision, definition, remoteMatch));
         }
 
@@ -46,7 +47,7 @@ namespace GitCommands.ExternalLinks
             return matchingRemotes;
         }
 
-        private IEnumerable<Match> ParseRemotes(ExternalLinkDefinition definition)
+        private async Task<IEnumerable<Match>> ParseRemotesAsync(ExternalLinkDefinition definition)
         {
             IList<Match> allMatches = new List<Match>();
 
@@ -58,7 +59,7 @@ namespace GitCommands.ExternalLinks
 
             IList<string> remoteUrls = new List<string>();
 
-            var remotes = _gitRemoteManager.LoadRemotes(false);
+            var remotes = await _gitRemoteManager.LoadRemotesAsync(false).ConfigureAwait(false);
             var matchingRemotes = GetMatchingRemotes(definition, remotes);
 
             foreach (var remote in matchingRemotes)

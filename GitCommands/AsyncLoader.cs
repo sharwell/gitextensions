@@ -26,31 +26,31 @@ namespace GitCommands
         /// <param name="doMe">The stuff we want to do. Should return whatever continueWith expects.</param>
         /// <param name="continueWith">Do this on original sync context.</param>
         /// <param name="onError">Do this on original sync context if doMe barfs.</param>
-        public static Task<T> DoAsync<T>(Func<T> doMe, Action<T> continueWith, Action<AsyncErrorEventArgs> onError)
+        public static Task<T> DoAsync<T>(Func<Task<T>> doMeAsync, Func<T, Task> continueWithAsync, Action<AsyncErrorEventArgs> onError)
         {
             AsyncLoader loader = new AsyncLoader();
             loader.LoadingError += (sender, e) => onError(e);
-            return loader.LoadAsync(doMe, continueWith);
+            return loader.LoadAsync(doMeAsync, continueWithAsync);
         }
 
-        public static Task<T> DoAsync<T>(Func<T> doMe, Action<T> continueWith)
+        public static Task<T> DoAsync<T>(Func<Task<T>> doMeAsync, Func<T, Task> continueWithAsync)
         {
             AsyncLoader loader = new AsyncLoader();
-            return loader.LoadAsync(doMe, continueWith);
+            return loader.LoadAsync(doMeAsync, continueWithAsync);
         }
 
-        public static Task DoAsync(Action doMe, Action continueWith)
+        public static Task DoAsync(Func<Task> doMeAsync, Func<Task> continueWithAsync)
         {
             AsyncLoader loader = new AsyncLoader();
-            return loader.LoadAsync(doMe, continueWith);
+            return loader.LoadAsync(doMeAsync, continueWithAsync);
         }
 
-        public Task LoadAsync(Action loadContent, Action onLoaded)
+        public Task LoadAsync(Func<Task> loadContentAsync, Func<Task> onLoadedAsync)
         { 
-            return LoadAsync((token) => loadContent(), onLoaded);
+            return LoadAsync(token => loadContentAsync(), onLoadedAsync);
         }
 
-        public async Task LoadAsync(Action<CancellationToken> loadContent, Action onLoaded)
+        public async Task LoadAsync(Func<CancellationToken, Task> loadContentAsync, Func<Task> onLoadedAsync)
         {
             Cancel();
             if (_cancelledTokenSource != null)
@@ -71,7 +71,7 @@ namespace GitCommands
 
                 if (!token.IsCancellationRequested)
                 {
-                    loadContent(token);
+                    await loadContentAsync(token).ConfigureAwait(false);
                 }
             }
             catch (Exception e)
@@ -97,7 +97,7 @@ namespace GitCommands
             {
                 try
                 {
-                    onLoaded();
+                    await onLoadedAsync().ConfigureAwait(true);
                 }
                 catch (Exception e)
                 {
@@ -107,12 +107,12 @@ namespace GitCommands
             }
         }
 
-        public Task<T> LoadAsync<T>(Func<T> loadContent, Action<T> onLoaded)
+        public Task<T> LoadAsync<T>(Func<Task<T>> loadContentAsync, Func<T, Task> onLoadedAsync)
         {
-            return LoadAsync((token) => loadContent(), onLoaded);
+            return LoadAsync(token => loadContentAsync(), onLoadedAsync);
         }
 
-        public async Task<T> LoadAsync<T>(Func<CancellationToken, T> loadContent, Action<T> onLoaded)
+        public async Task<T> LoadAsync<T>(Func<CancellationToken, Task<T>> loadContentAsync, Func<T, Task> onLoadedAsync)
         {
             Cancel();
             if (_cancelledTokenSource != null)
@@ -139,7 +139,7 @@ namespace GitCommands
                 }
                 else
                 {
-                    result = loadContent(token);
+                    result = await loadContentAsync(token).ConfigureAwait(false);
                 }
             }
             catch (Exception e)
@@ -165,7 +165,7 @@ namespace GitCommands
             {
                 try
                 {
-                    onLoaded(result);
+                    await onLoadedAsync(result).ConfigureAwait(true);
                 }
                 catch (Exception e)
                 {

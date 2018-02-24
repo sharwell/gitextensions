@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace GitUIPluginInterfaces
 {
@@ -10,23 +11,23 @@ namespace GitUIPluginInterfaces
     {
         IConfigFileSettings LocalConfigFile { get; }
 
-        string AddRemote(string remoteName, string path);
-        IList<IGitRef> GetRefs(bool tags = true, bool branches = true);
+        Task<string> AddRemoteAsync(string remoteName, string path);
+        Task<IList<IGitRef>> GetRefsAsync(bool tags = true, bool branches = true);
         IEnumerable<string> GetSettings(string setting);
-        IEnumerable<IGitItem> GetTree(string id, bool full);
+        Task<IEnumerable<IGitItem>> GetTreeAsync(string id, bool full);
 
         /// <summary>
         /// Removes the registered remote by running <c>git remote rm</c> command.
         /// </summary>
         /// <param name="remoteName">The remote name.</param>
-        string RemoveRemote(string remoteName);
+        Task<string> RemoveRemoteAsync(string remoteName);
 
         /// <summary>
         /// Renames the registered remote by running <c>git remote rename</c> command.
         /// </summary>
         /// <param name="remoteName">The current remote name.</param>
         /// <param name="newName">The new remote name.</param>
-        string RenameRemote(string remoteName, string newName);
+        Task<string> RenameRemoteAsync(string remoteName, string newName);
         void SetSetting(string setting, string value);
         void UnsetSetting(string setting);
 
@@ -38,24 +39,24 @@ namespace GitUIPluginInterfaces
         /// <summary>
         /// Run git command, console window is hidden, wait for exit, redirect output
         /// </summary>
-        string RunGitCmd(string arguments, Encoding encoding = null, byte[] stdInput = null);
+        Task<string> RunGitCmdAsync(string arguments, Encoding encoding = null, byte[] stdInput = null);
 
         /// <summary>
         /// Run git command, console window is hidden, wait for exit, redirect output
         /// </summary>
-        CmdResult RunGitCmdResult(string arguments, Encoding encoding = null, byte[] stdInput = null);
+        Task<CmdResult> RunGitCmdResultAsync(string arguments, Encoding encoding = null, byte[] stdInput = null);
 
         /// <summary>
         /// Run command, console window is hidden, wait for exit, redirect output
         /// </summary>
-        string RunCmd(string cmd, string arguments, Encoding encoding = null, byte[] stdIn = null);
+        Task<string> RunCmdAsync(string cmd, string arguments, Encoding encoding = null, byte[] stdIn = null);
 
         /// <summary>
         /// Run command, console window is hidden, wait for exit, redirect output
         /// </summary>
-        CmdResult RunCmdResult(string cmd, string arguments, Encoding encoding = null, byte[] stdInput = null);
+        Task<CmdResult> RunCmdResultAsync(string cmd, string arguments, Encoding encoding = null, byte[] stdInput = null);
 
-        string RunBatchFile(string batchFile);
+        Task<string> RunBatchFileAsync(string batchFile);
 
         /// <summary>
         /// Determines whether the given repository has index.lock file.
@@ -86,15 +87,15 @@ namespace GitUIPluginInterfaces
         /// </summary>
         /// <param name="relativePath">A path relative to the .git directory</param>
         /// <returns></returns>
-        string ResolveGitInternalPath(string relativePath);
+        Task<string> ResolveGitInternalPathAsync(string relativePath);
 
         /// <summary>Indicates whether the specified directory contains a git repository.</summary>
         bool IsValidGitWorkingDir();
 
         /// <summary>Indicates whether the repository is in a 'detached HEAD' state.</summary>
-        bool IsDetachedHead();
+        Task<bool> IsDetachedHeadAsync();
 
-        bool IsExistingCommitHash(string sha1Fragment, out string fullSha1);
+        Task<(bool, string fullSha1)> IsExistingCommitHashAsync(string sha1Fragment);
 
         /// <summary>Gets the path to the git application executable.</summary>
         string GitCommand { get; }
@@ -115,27 +116,27 @@ namespace GitUIPluginInterfaces
         /// Retrieves registered remotes by running <c>git remote show</c> command.
         /// </summary>
         /// <returns>Registered remotes.</returns>
-        string[] GetRemotes();
+        Task<string[]> GetRemotesAsync();
 
         /// <summary>
         /// Retrieves registered remotes by running <c>git remote show</c> command.
         /// </summary>
         /// <param name="allowEmpty"></param>
         /// <returns>Registered remotes.</returns>
-        string[] GetRemotes(bool allowEmpty);
+        Task<string[]> GetRemotesAsync(bool allowEmpty);
 
         string GetSetting(string setting);
         string GetEffectiveSetting(string setting);
 
-        bool StartPageantForRemote(string remote);
+        Task<bool> StartPageantForRemoteAsync(string remote);
 
         /// <summary>Gets the current branch; or "(no branch)" if HEAD is detached.</summary>
-        string GetSelectedBranch();
+        Task<string> GetSelectedBranchAsync();
 
         /// <summary>true if ".git" directory does NOT exist.</summary>
         bool IsBareRepository();
 
-        bool IsRunningGitProcess();
+        Task<bool> IsRunningGitProcessAsync();
 
         ISettingsSource GetEffectiveSettings();
 

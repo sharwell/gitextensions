@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace GitCommands
 {
@@ -53,20 +54,20 @@ namespace GitCommands
             ".tiff",
         };
 
-        public static bool IsBinaryFile(GitModule aModule, string fileName)
+        public static async Task<bool> IsBinaryFileAsync(GitModule aModule, string fileName)
         {
-            var t = IsBinaryAccordingToGitAttributes(aModule, fileName);
+            var t = await IsBinaryAccordingToGitAttributesAsync(aModule, fileName).ConfigureAwait(false);
             if (t.HasValue)
                 return t.Value;
             return HasMatchingExtension(BinaryExtensions, fileName);
         }
 
         /// <returns>null if no info in .gitattributes (or ambiguous). True if marked as binary, false if marked as text</returns>
-        private static bool? IsBinaryAccordingToGitAttributes(GitModule aModule, string fileName)
+        private static async Task<bool?> IsBinaryAccordingToGitAttributesAsync(GitModule aModule, string fileName)
         {
             string[] diffvals = { "set", "astextplain", "ada", "bibtext", "cpp", "csharp", "fortran", "html", "java", "matlab", "objc", "pascal", "perl", "php", "python", "ruby", "tex" };
             string cmd = "check-attr -z diff text crlf eol -- " + fileName.Quote();
-            string result = aModule.RunGitCmd(cmd);
+            string result = await aModule.RunGitCmdAsync(cmd).ConfigureAwait(false);
             var lines = result.Split(new[] { '\n', '\0' });
             var attributes = new Dictionary<string, string>();
             for (int i = 0; i < lines.Length - 2; i += 3)
