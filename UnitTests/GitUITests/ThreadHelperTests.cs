@@ -23,11 +23,12 @@ namespace GitUITests
             {
                 var ex = new Exception();
 
-                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
                     await TaskScheduler.Default;
-                    form.InvokeAsync(() => throw ex).FileAndForget();
-                });
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    throw ex;
+                }).FileAndForget();
 
                 JoinPendingOperations();
                 Assert.AreSame(ex, helper.Exception);
@@ -42,11 +43,11 @@ namespace GitUITests
                 var form = new Form();
                 form.Dispose();
 
-                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
                     await TaskScheduler.Default;
-                    form.InvokeAsync(EmptyAction).FileAndForget();
-                });
+                    await form.SwitchToMainThreadAsync();
+                }).FileAndForget();
 
                 JoinPendingOperations();
                 Assert.Null(helper.Exception, helper.Message);
@@ -57,15 +58,15 @@ namespace GitUITests
         public void FileAndForgetFilterCanAllowExceptions()
         {
             using (var helper = new ThreadExceptionHelper())
-            using (var form = new Form())
             {
                 var ex = new Exception();
 
-                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
                     await TaskScheduler.Default;
-                    form.InvokeAsync(() => throw ex).FileAndForget(fileOnlyIf: e => e == ex);
-                });
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    throw ex;
+                }).FileAndForget(fileOnlyIf: e => e == ex);
 
                 JoinPendingOperations();
                 Assert.AreSame(ex, helper.Exception);
@@ -76,15 +77,15 @@ namespace GitUITests
         public void FileAndForgetFilterCanIgnoreExceptions()
         {
             using (var helper = new ThreadExceptionHelper())
-            using (var form = new Form())
             {
                 var ex = new Exception();
 
-                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
                     await TaskScheduler.Default;
-                    form.InvokeAsync(() => throw ex).FileAndForget(fileOnlyIf: e => e != ex);
-                });
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    throw ex;
+                }).FileAndForget(fileOnlyIf: e => e != ex);
 
                 JoinPendingOperations();
                 Assert.Null(helper.Exception, helper.Message);
@@ -99,11 +100,11 @@ namespace GitUITests
                 var form = new Form();
                 form.Dispose();
 
-                ThreadHelper.JoinableTaskFactory.Run(async () =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
                     await TaskScheduler.Default;
-                    form.InvokeAsync(EmptyAction).FileAndForget(fileOnlyIf: ex => true);
-                });
+                    await form.SwitchToMainThreadAsync();
+                }).FileAndForget(fileOnlyIf: ex => true);
 
                 JoinPendingOperations();
                 Assert.Null(helper.Exception, helper.Message);
