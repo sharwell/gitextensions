@@ -31,11 +31,10 @@ namespace GitUITests
             {
                 var ex = new Exception();
 
-                ThreadHelper.JoinableTaskFactory.Run(() =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
-                    ThrowExceptionAsync(ex).FileAndForget();
-                    return Task.CompletedTask;
-                });
+                    await ThrowExceptionAsync(ex);
+                }).FileAndForget();
 
                 JoinPendingOperations();
                 Assert.AreSame(ex, helper.Exception);
@@ -50,11 +49,10 @@ namespace GitUITests
                 var form = new Form();
                 form.Dispose();
 
-                ThreadHelper.JoinableTaskFactory.Run(() =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
-                    YieldOntoControlMainThreadAsync(form).FileAndForget();
-                    return Task.CompletedTask;
-                });
+                    await YieldOntoControlMainThreadAsync(form);
+                }).FileAndForget();
 
                 JoinPendingOperations();
                 Assert.Null(helper.Exception, helper.Message);
@@ -68,11 +66,10 @@ namespace GitUITests
             {
                 var ex = new Exception();
 
-                ThreadHelper.JoinableTaskFactory.Run(() =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
-                    ThrowExceptionAsync(ex).FileAndForget(fileOnlyIf: e => e == ex);
-                    return Task.CompletedTask;
-                });
+                    await ThrowExceptionAsync(ex);
+                }).FileAndForget(fileOnlyIf: e => e == ex);
 
                 JoinPendingOperations();
                 Assert.AreSame(ex, helper.Exception);
@@ -86,11 +83,10 @@ namespace GitUITests
             {
                 var ex = new Exception();
 
-                ThreadHelper.JoinableTaskFactory.Run(() =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
-                    ThrowExceptionAsync(ex).FileAndForget(fileOnlyIf: e => e != ex);
-                    return Task.CompletedTask;
-                });
+                    await ThrowExceptionAsync(ex);
+                }).FileAndForget(fileOnlyIf: e => e != ex);
 
                 JoinPendingOperations();
                 Assert.Null(helper.Exception, helper.Message);
@@ -105,11 +101,10 @@ namespace GitUITests
                 var form = new Form();
                 form.Dispose();
 
-                ThreadHelper.JoinableTaskFactory.Run(() =>
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
-                    YieldOntoControlMainThreadAsync(form).FileAndForget(fileOnlyIf: ex => true);
-                    return Task.CompletedTask;
-                });
+                    await YieldOntoControlMainThreadAsync(form);
+                }).FileAndForget(fileOnlyIf: ex => true);
 
                 JoinPendingOperations();
                 Assert.Null(helper.Exception, helper.Message);

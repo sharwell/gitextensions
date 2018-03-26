@@ -85,7 +85,7 @@ namespace GitUI.CommandsDialogs.BrowseDialog
             }
             catch (Exception ex)
             {
-                this.InvokeSync(() =>
+                this.SendToUIThread(() =>
                     {
                         if (Visible)
                         {
@@ -118,7 +118,7 @@ namespace GitUI.CommandsDialogs.BrowseDialog
 
         private void Done()
         {
-            this.InvokeSync(() =>
+            this.SendToUIThread(() =>
             {
                 progressBar1.Visible = false;
 

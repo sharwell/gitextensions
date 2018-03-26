@@ -72,7 +72,7 @@ namespace GitUI
             joinableTask.Task.FileAndForget(fileOnlyIf);
         }
 
-        public static void FileAndForget(this Task task, Func<Exception, bool> fileOnlyIf = null)
+        private static void FileAndForget(this Task task, Func<Exception, bool> fileOnlyIf = null)
         {
             JoinableTaskFactory.RunAsync(
                 async () =>
