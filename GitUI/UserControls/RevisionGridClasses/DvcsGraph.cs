@@ -207,7 +207,7 @@ namespace GitUI.RevisionGridClasses
                     return;
                 }
 
-                this.InvokeSync(() =>
+                this.SendToUIThread(() =>
                     {
                         lock (_backgroundEvent)
                         {
@@ -539,12 +539,11 @@ namespace GitUI.RevisionGridClasses
         {
             // We have to post this since the thread owns a lock on GraphData that we'll
             // need in order to re-draw the graph.
-            this.InvokeAsync(() =>
+            this.PostToUIThread(() =>
                 {
                     ClearDrawCache();
                     Invalidate();
-                })
-                .FileAndForget();
+                });
         }
 
         public void dataGrid_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
@@ -652,7 +651,7 @@ namespace GitUI.RevisionGridClasses
                     // Update the row (if needed)
                     if (curCount == Math.Min(scrollTo, _visibleBottom) - 1)
                     {
-                        this.InvokeAsync(o => UpdateRow(o), curCount).FileAndForget();
+                        this.PostToUIThread(o => UpdateRow(o), curCount);
                     }
 
                     int count = 0;
@@ -663,7 +662,7 @@ namespace GitUI.RevisionGridClasses
 
                     if (curCount == count)
                     {
-                        this.InvokeAsync(UpdateColumnWidth).FileAndForget();
+                        this.PostToUIThread(UpdateColumnWidth);
                     }
 
                     curCount = _graphData.CachedCount;

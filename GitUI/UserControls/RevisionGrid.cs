@@ -1356,7 +1356,7 @@ namespace GitUI
         private void _revisionGraphCommand_Error(object sender, AsyncErrorEventArgs e)
         {
             // This has to happen on the UI thread
-            this.InvokeAsync(() =>
+            this.PostToUIThread(() =>
                                   {
                                       Error.Visible = true;
                                       ////Error.BringToFront();
@@ -1364,11 +1364,10 @@ namespace GitUI
                                       NoCommits.Visible = false;
                                       Revisions.Visible = false;
                                       Loading.Visible = false;
-                                  })
-                .FileAndForget();
+                                  });
 
             DisposeRevisionGraphCommand();
-            this.InvokeAsync(() => throw new AggregateException(e.Exception)).FileAndForget();
+            this.PostToUIThread(() => throw new AggregateException(e.Exception));
             e.Handled = true;
         }
 
@@ -1421,7 +1420,7 @@ namespace GitUI
                 !FilterIsApplied(true))
             {
                 // This has to happen on the UI thread
-                this.InvokeAsync(() =>
+                this.PostToUIThread(() =>
                                       {
                                           NoGit.Visible = false;
                                           NoCommits.Visible = true;
@@ -1429,13 +1428,12 @@ namespace GitUI
                                           Revisions.Visible = false;
                                           Loading.Visible = false;
                                           _isRefreshingRevisions = false;
-                                      })
-                    .FileAndForget();
+                                      });
             }
             else
             {
                 // This has to happen on the UI thread
-                this.InvokeAsync(() =>
+                this.PostToUIThread(() =>
                                       {
                                           UpdateGraph(null);
                                           Loading.Visible = false;
@@ -1445,8 +1443,7 @@ namespace GitUI
                                           {
                                               BuildServerWatcher.LaunchBuildServerInfoFetchOperation();
                                           }
-                                      })
-                    .FileAndForget();
+                                      });
             }
 
             DisposeRevisionGraphCommand();
@@ -2119,7 +2116,7 @@ namespace GitUI
             }
 
             // now that Body is filled (not null anymore) the revision grid can be refreshed to display the new information
-            this.InvokeAsyncDoNotUseInNewCode(() =>
+            this.PostToUIThread(() =>
             {
                 if (Revisions == null || Revisions.RowCount == 0 || Revisions.RowCount <= rowIndex || Revisions.RowCount != totalRowCount)
                 {

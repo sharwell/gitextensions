@@ -202,52 +202,52 @@ namespace GitUI
             }
         }
 
-        public static async Task InvokeAsync(this Control control, Action action)
+        public static void PostToUIThread(this Control control, Action action)
         {
-            await control.SwitchToMainThreadAsync();
-            action();
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                async () =>
+                {
+                    if (ThreadHelper.JoinableTaskContext.IsOnMainThread)
+                    {
+                        await Task.Yield();
+                    }
+
+                    await control.SwitchToMainThreadAsync();
+                    action();
+                })
+            .FileAndForget();
         }
 
-        public static async Task InvokeAsync<T>(this Control control, Action<T> action, T state)
+        public static void PostToUIThread<T>(this Control control, Action<T> action, T state)
         {
-            await control.SwitchToMainThreadAsync();
-            action(state);
+            ThreadHelper.JoinableTaskFactory.RunAsync(
+                async () =>
+                {
+                    if (ThreadHelper.JoinableTaskContext.IsOnMainThread)
+                    {
+                        await Task.Yield();
+                    }
+
+                    await control.SwitchToMainThreadAsync();
+                    action(state);
+                })
+            .FileAndForget();
         }
 
-#pragma warning disable VSTHRD100 // Avoid async void methods
-        /// <summary>
-        /// Use <see cref="InvokeAsync(Control, Action)"/> instead. If the result of
-        /// <see cref="InvokeAsync(Control, Action)"/> is not awaited, use
-        /// <see cref="ThreadHelper.FileAndForget(Task, Func{Exception, bool})"/> to ignore it.
-        /// </summary>
-        public static async void InvokeAsyncDoNotUseInNewCode(this Control control, Action action)
-#pragma warning restore VSTHRD100 // Avoid async void methods
-        {
-            if (ThreadHelper.JoinableTaskContext.IsOnMainThread)
-            {
-                await Task.Yield();
-            }
-            else
-            {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-            }
-
-            if (control.IsDisposed)
-            {
-                return;
-            }
-
-            action();
-        }
-
-        public static void InvokeSync(this Control control, Action action)
+        public static void SendToUIThread(this Control control, Action action)
         {
             ThreadHelper.JoinableTaskFactory.Run(
                 async () =>
                 {
                     try
                     {
-                        await InvokeAsync(control, action);
+                        if (ThreadHelper.JoinableTaskContext.IsOnMainThread)
+                        {
+                            await Task.Yield();
+                        }
+
+                        await control.SwitchToMainThreadAsync();
+                        action();
                     }
                     catch (Exception e)
                     {
