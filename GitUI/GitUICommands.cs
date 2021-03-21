@@ -587,7 +587,7 @@ namespace GitUI
             bool Action()
             {
                 using var viewPatch = new FormViewPatch(this);
-                if (!Strings.IsNullOrEmpty(patchFile))
+                if (!string.IsNullOrEmpty(patchFile))
                 {
                     viewPatch.LoadPatch(patchFile);
                 }
