@@ -117,7 +117,11 @@ namespace GitUI
                     && file.GetSubmoduleStatusAsync() is Task<GitSubmoduleStatus> task)
                 {
                     // Patch already evaluated
+#pragma warning disable VSTHRD103 // Call async methods when in an async method
+#pragma warning disable VSTHRD003 // Avoid awaiting foreign Tasks
                     var status = ThreadHelper.JoinableTaskFactory.Run(() => task);
+#pragma warning restore VSTHRD003 // Avoid awaiting foreign Tasks
+#pragma warning restore VSTHRD103 // Call async methods when in an async method
                     return status is not null
                         ? LocalizationHelpers.ProcessSubmoduleStatus(fileViewer.Module, status)
                         : $"Failed to get status for submodule \"{file.Name}\"";
