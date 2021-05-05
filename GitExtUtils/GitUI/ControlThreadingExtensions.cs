@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -21,7 +22,7 @@ namespace GitUI
             _controlDisposed = new ConditionalWeakTable<IComponent, StrongBox<CancellationToken>>();
         }
 
-#pragma warning disable VSTHRD004 // Await SwitchToMainThreadAsync
+        [SuppressMessage("Usage", "VSTHRD004:Await SwitchToMainThreadAsync", Justification = "MainThreadAwaitable is wrapped in a custom awaitable.")]
         public static ControlMainThreadAwaitable SwitchToMainThreadAsync(this ToolStripItem control, CancellationToken cancellationToken = default)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -46,6 +47,7 @@ namespace GitUI
             return new ControlMainThreadAwaitable(mainThreadAwaiter, cancellationTokenSource);
         }
 
+        [SuppressMessage("Usage", "VSTHRD004:Await SwitchToMainThreadAsync", Justification = "MainThreadAwaitable is wrapped in a custom awaitable.")]
         public static ControlMainThreadAwaitable SwitchToMainThreadAsync(this Control control, CancellationToken cancellationToken = default)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -69,7 +71,6 @@ namespace GitUI
             var mainThreadAwaiter = ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(disposedCancellationToken);
             return new ControlMainThreadAwaitable(mainThreadAwaiter, cancellationTokenSource);
         }
-#pragma warning restore VSTHRD004 // Await SwitchToMainThreadAsync
 
         public readonly struct ControlMainThreadAwaitable
         {
