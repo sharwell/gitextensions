@@ -228,11 +228,12 @@ namespace TeamCityIntegration
                                                                             .Select(x => x.Attribute("id").Value))
                                                              .ToArray();
 
-                                NotifyObserverOfBuilds(buildIds, observer, cancellationToken);
+                                return NotifyObserverOfBuildsAsync(buildIds, observer, cancellationToken);
                             },
                         cancellationToken,
                         TaskContinuationOptions.AttachedToParent | TaskContinuationOptions.ExecuteSynchronously,
                         TaskScheduler.Current)
+                    .Unwrap()
                     .ContinueWith(
                         task => localObserver.OnError(task.Exception),
                         CancellationToken.None,
@@ -249,7 +250,7 @@ namespace TeamCityIntegration
             }
         }
 
-        private void NotifyObserverOfBuilds(string[] buildIds, IObserver<BuildInfo> observer, CancellationToken cancellationToken)
+        private async Task NotifyObserverOfBuildsAsync(string[] buildIds, IObserver<BuildInfo> observer, CancellationToken cancellationToken)
         {
             var tasks = new List<Task>(8);
             var buildsLeft = buildIds.Length;
@@ -285,9 +286,7 @@ namespace TeamCityIntegration
 
                     try
                     {
-#pragma warning disable VSTHRD002
-                        Task.WaitAll(batchTasks, cancellationToken);
-#pragma warning restore VSTHRD002
+                        await Task.WhenAll(batchTasks).WithCancellation(cancellationToken);
                     }
                     catch (Exception e)
                     {

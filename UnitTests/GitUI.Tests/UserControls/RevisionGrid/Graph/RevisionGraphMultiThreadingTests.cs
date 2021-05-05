@@ -42,7 +42,7 @@ namespace GitUITests.UserControls.RevisionGrid
         }
 
         [Test, Timeout(10 /*min*/ * 60 /*s*/ * 1000 /*ms*/)]
-        public void ShouldReorderInTopoOrder()
+        public async Task ShouldReorderInTopoOrder()
         {
             for (int i = 0; i < _numberOfRepeats; i++)
             {
@@ -59,9 +59,7 @@ namespace GitUITests.UserControls.RevisionGrid
                 buildCacheTask.Start();
                 renderTask.Start();
 
-#pragma warning disable VSTHRD002
-                Task.WaitAll(loadRevisionsTask, buildCacheTask, renderTask);
-#pragma warning restore VSTHRD002
+                await Task.WhenAll(loadRevisionsTask, buildCacheTask, renderTask);
 
                 // One last 'cache to', in case the loading of the revisions was finished after building the cache (unlikely)
                 _revisionGraph.CacheTo(_revisionGraph.Count, _revisionGraph.Count);

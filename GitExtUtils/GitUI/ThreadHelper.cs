@@ -1,6 +1,7 @@
 ﻿using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -117,6 +118,8 @@ namespace GitUI
             await _joinableTaskCollection.JoinTillEmptyAsync(cancellationToken);
         }
 
+        [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "The task is already complete. https://github.com/microsoft/vs-threading/issues/301")]
+        [SuppressMessage("Usage", "VSTHRD104:Offer async methods", Justification = "The task is already complete. https://github.com/microsoft/vs-threading/issues/301")]
         public static T CompletedResult<T>(this Task<T> task)
         {
             if (!task.IsCompleted)
@@ -124,11 +127,11 @@ namespace GitUI
                 throw new InvalidOperationException();
             }
 
-#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
             return task.Result;
-#pragma warning restore VSTHRD002 // Avoid problematic synchronous waits
         }
 
+        [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "The task is already complete. https://github.com/microsoft/vs-threading/issues/301")]
+        [SuppressMessage("Usage", "VSTHRD104:Offer async methods", Justification = "The task is already complete. https://github.com/microsoft/vs-threading/issues/301")]
         public static T? CompletedOrDefault<T>(this Task<T> task)
         {
             if (!task.IsCompleted)
@@ -136,9 +139,7 @@ namespace GitUI
                 return default;
             }
 
-#pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
             return task.Result;
-#pragma warning restore VSTHRD002 // Avoid problematic synchronous waits
         }
     }
 }
