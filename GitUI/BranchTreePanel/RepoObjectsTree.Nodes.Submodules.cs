@@ -345,19 +345,10 @@ namespace GitUI.BranchTreePanel
                     return;
                 }
 
-                loadedNodes.DepthEnumerator<SubmoduleNode>()
-#pragma warning disable VSTHRD101 // Avoid unsupported async delegates
-                    .ForEach(async node =>
-                    {
-                        try
-                        {
-                            await node.SetStatusToolTipAsync(token).ConfigureAwait(false);
-                        }
-                        catch (OperationCanceledException)
-                        {
-                        }
-                    });
-#pragma warning restore VSTHRD101 // Avoid unsupported async delegates
+                foreach (var node in loadedNodes.DepthEnumerator<SubmoduleNode>())
+                {
+                    ThreadHelper.JoinableTaskFactory.RunAsync(() => node.SetStatusToolTipAsync(token)).FileAndForget();
+                }
             }
 
             protected override void PostFillTreeViewNode(bool firstTime)
